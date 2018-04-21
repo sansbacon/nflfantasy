@@ -1,0 +1,144 @@
+def run_solver(all_players,depth):
+	solver = pywraplp.Solver('FD', pywraplp.Solver.CBC_MIXED_INTEGER_PROGRAMMING)
+
+	'''
+	Setup Binary Player variables
+	This is set as 0 or 1 depending if player is on/out of lineup solution 
+	'''
+	variables = [solver.IntVar(0, 1, str(p.get('player'))) for p in projections]
+
+	'''
+	Setup Maximization over player point projections
+	In the examples Google provides, you know the coefficients ahead of time
+	This gathers up fppg and will be multiplied by 0 or 1
+	Then you can get the lineup total because non-members will zero out
+	Is same length as variables list, so you add the coefficient to the right player
+	'''
+
+	objective = solver.Objective()
+	objective.SetMaximization()
+	for i, player in enumerate(all_players):
+		objective.SetCoefficient(variables[i], player.proj)
+	
+	'''
+	Add Salary Cap Constraint
+	This works the same way as projections
+	The players that are 1 will be multiplied by their salary
+	Players who are not on the team will be zeroed out
+	'''
+	
+	salary_cap = solver.Constraint(SALARY_CAP-1000, SALARY_CAP)
+	for i, player in enumerate(all_players):
+		salary_cap.SetCoefficient(variables[i], player.cost)
+
+	'''
+	Add Player Position constraints including flex position
+	Looks like solver.Add is used to add constraints
+	Unclear why it is different than Constraint method
+	'''
+	
+	# this is the same as columns 6:8 in the R solution
+	# list/vector of 0 or 1 based on whether chosen in solution
+	flex_rb = solver.IntVar(0, 1, 'Flex_RB')
+	flex_wr = solver.IntVar(0, 1, 'Flex_WR')
+	flex_te = solver.IntVar(0, 1, 'Flex_TE')
+
+	# this makes sense, solution can only have 1 flex
+	solver.Add(flex_rb+flex_wr+flex_te==1)
+
+	for position, limit in POSITION_LIMITS_FLEX:
+	
+		# zip creates a list of tuples
+		# zip(a, b) -> [(a1, b1), (a2, b2), etc.]
+		# filter needs 2 arguments (x, _) because filtering list of tuples
+		# *filter is used so it is a proper argument for outer zip()
+		# ids is a list of players
+		# players_by_pos is a list of the accompanying variables (coefficients?)
+		
+		ids, players_by_pos = zip(*filter(lambda (x,_): x.pos in position, zip(all_players, variables)))
+
+		# this makes sense
+		# if you are using a wr for flex, then bump up the WR limit by 1
+		# same goes for either an RB or TE
+		if position == 'WR':
+			solver.Add(solver.Sum(players_by_pos) == limit+flex_wr)
+		elif position == 'RB':
+			solver.Add(solver.Sum(players_by_pos) == limit+flex_rb)
+		elif position == 'TE':
+			solver.Add(solver.Sum(players_by_pos) == limit+flex_te)
+		else :
+			solver.Add(solver.Sum(players_by_pos) == limit)
+
+	'''
+	Add min number of different teams players must be drafted from constraint (draftkings == 2)
+	'''
+	team_names = set([o.team for o in all_players])
+	teams = []
+	for team in team_names:
+		teams.append(solver.IntVar(0, 1, team))
+	solver.Add(solver.Sum(teams)>=2)
+
+	for idx,team in enumerate(team_names):
+		ids, players_by_team = zip(*filter(lambda (x,_): x.team in team, zip(all_players, variables)))
+		solver.Add(teams[idx]<=solver.Sum(players_by_team))
+
+	'''
+	Add Defence cant play against any offense's player team constraint
+	'''
+	o_players = filter(lambda x: x.pos in ['QB','WR','RB','TE'], all_players)
+	opps_team_names= set([o.opps_team for o in o_players])
+	teams_obj = filter(lambda x: x.pos == 'DST' , all_players)
+	teams = set([o.team for o in teams_obj])
+	for opps_team in team_names:
+		if opps_team in teams :
+			ids, players_by_opps_team = zip(*filter(lambda (x,_): x.pos in ['QB','WR','RB','TE'] and x.opps_team in opps_team, zip(all_players, variables)))
+			idxs, defense = zip(*filter(lambda (x,_): x.pos == 'DST' and x.team in opps_team, zip(all_players, variables)))
+ 			for player in players_by_opps_team:
+				solver.Add(player<=1-defense[0])
+
+	'''
+	Add QB stacking (at least 1 wr on same team as QB) constraint
+	'''
+	offense_team_names = set([o.team for o in o_players])
+	for o_team in offense_team_names:
+		ids, players_by_team = zip(*filter(lambda (x,_): x.pos in ['WR'] and x.team == o_team, zip(all_players, variables)))
+		idxs, qb = zip(*filter(lambda (x,_): x.pos == 'QB' and x.team == o_team, zip(all_players, variables)))
+		solver.Add(solver.Sum(players_by_team)>=solver.Sum(qb))
+
+	'''
+	Add Max of 1 qb wr te or rb per team constraint, NOT TO BE USED WITH QB STACKING
+	'''
+# 	for team in list(team_names):
+# 		ids, players_by_team = zip(*filter(lambda (x,_): x.team in team and x.pos in ['WR','TE','RB','QB'], zip(all_players, variables)))
+# 		solver.Add(solver.Sum(players_by_team)<=1)
+
+	'''
+	Add Max of 2 qb wr te or rb per game constraint, spread risk
+	'''
+	#for team in list(team_names):
+	#	team_players = filter(lambda x: x.team in team, all_players)
+	#	ids, players_by_game = zip(*filter(lambda (x,_): x.team in team or x.team in team_players[0].opps_team and x.pos in ['WR','TE','RB','QB'], zip(all_players, variables)))
+	#	solver.Add(solver.Sum(players_by_game)<=2)
+		
+	'''
+	Add remove previous solutions constraint and loop to generate X rosters
+	'''
+	rosters = []
+	for x in xrange(depth):
+		if rosters :
+			ids, players_from_roster = zip(*filter(lambda (x,_): x in rosters[-1].sorted_players()  , zip(all_players, variables)))
+			ids, players_not_from_roster = zip(*filter(lambda (x,_): x  not in rosters[-1].sorted_players()  , zip(all_players, variables)))
+			solver.Add(solver.Sum(players_not_from_roster)+solver.Sum(1-x for x in players_from_roster)>=9)
+		solution = solver.Solve()
+		if solution == solver.OPTIMAL:
+			roster = Roster()
+			for i, player in enumerate(all_players):
+				if variables[i].solution_value() == 1:
+					roster.add_player(player)
+			rosters.append(roster)
+			print "Optimal roster: %s" % x
+			print roster
+		else:
+			raise Exception('No solution error')
+	return rosters
+
