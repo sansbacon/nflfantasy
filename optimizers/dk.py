@@ -15,21 +15,22 @@ class Player(object):
 
         """
         logging.getLogger(__name__).addHandler(logging.NullHandler())
-        self.id = opts['pid']
+        self.id = str(opts['pid'])
         self.name = opts['plyr']
         self.pos = opts['pos'].upper()
         self.team = opts['team'].upper()
         self.sal = int(opts['sal'])
         self.proj = float(opts['proj'])
-        self.posrk = float(opts['posrk'])
-        self.salrk = float(opts['salrk'])
         self.lock = int(opts.get('lock', 0)) > 0
         self.ban = int(opts.get('lock', 0)) < 0
+        if opts.get('posrk'):
+            self.posrk = float(opts['posrk'])
+        if opts.get('salrk'):
+            self.salrk = float(opts['salrk'])
 
     def __repr__(self):
-        return "[{0: <2}] {1: <20}(${2}, {3}) [{4}, {5}] {6}".format(
-            self.pos, self.name, self.sal, self.proj, self.posrk,
-            self.salrk, "LOCK" if self.lock else "")
+        return "[{0: <2}] {1: <20}(${2}, {3}) {4}".format(
+            self.pos, self.name, self.sal, self.proj, "LOCK" if self.lock else "")
 
 
 class Roster(object):
@@ -93,29 +94,38 @@ class NFLOptimizerDK(object):
         self.salary_cap = salary_cap
         self.position_limits = position_limits
 
-    def _optimize(self, all_players, max_score):
+    def _optimize(self, all_players, max_score, solver_name):
         '''
         Optimizes draftkings NFL team
 
         Args:
             all_players(list): of Player
             max_score(float): constraint
+            solve_name(str): e.g. 'Gurobi'
 
         Returns:
             Roster
 
         '''
-        solver = pywraplp.Solver('FD', pywraplp.Solver.CBC_MIXED_INTEGER_PROGRAMMING)
+        if solver_name.lower() == 'gurobi':
+            try:
+                solver = pywraplp.Solver('FD', pywraplp.Solver.GUROBI_MIXED_INTEGER_PROGRAMMING)
+            except:
+                logging.error('could not use Gurobi')
+                solver = pywraplp.Solver('FD', pywraplp.Solver.CBC_MIXED_INTEGER_PROGRAMMING)
+        else:
+            solver = pywraplp.Solver('FD', pywraplp.Solver.CBC_MIXED_INTEGER_PROGRAMMING)
+
         variables = []
 
         # locks and bans
         for player in all_players:
             if player.lock:
-                variables.append(solver.IntVar(1, 1, player.name))
+                variables.append(solver.IntVar(1, 1, player.id))
             elif player.ban:
-                variables.append(solver.IntVar(0, 0, player.name))
+                variables.append(solver.IntVar(0, 0, player.id))
             else:
-                variables.append(solver.IntVar(0, 1, player.name))
+                variables.append(solver.IntVar(0, 1, player.id))
 
         # maximize proj (fantasy points)
         objective = solver.Objective()
@@ -158,32 +168,40 @@ class NFLOptimizerDK(object):
             logging.error("No solution :(")
         return roster
 
-    def _optimize_diverse(self, all_players, existing_lineups, overlap=5, player_cap=50):
+    def _optimize_diverse(self, all_players, existing_lineups, solver_name,
+                          overlap=5, player_cap=50):
         '''
-        Optimizes draftkings NFL team
-        With constraint
+        Optimizes draftkings NFL team with diverse lineup constraints
 
         Args:
             all_players(list): of Player
             existing_lineups(list): of list of Player
+            solve_name(str): e.g. gurobi
             overlap(int): how many players can overlap, default 6
 
         Returns:
             Roster
 
         '''
-        # CBC_MIXED_INTEGER_PROGRAMMING) #GUROBI_MIXED_INTEGER_PROGRAMMING)
-        solver = pywraplp.Solver('FD', pywraplp.Solver.GUROBI_MIXED_INTEGER_PROGRAMMING)
+        if solver_name.lower() == 'gurobi':
+            try:
+                solver = pywraplp.Solver('FD', pywraplp.Solver.GUROBI_MIXED_INTEGER_PROGRAMMING)
+            except:
+                logging.error('could not use Gurobi')
+                solver = pywraplp.Solver('FD', pywraplp.Solver.CBC_MIXED_INTEGER_PROGRAMMING)
+            else:
+                solver = pywraplp.Solver('FD', pywraplp.Solver.CBC_MIXED_INTEGER_PROGRAMMING)
+
         variables = []
 
         # locks and bans
         for player in all_players:
             if player.lock:
-                variables.append(solver.IntVar(1, 1, player.name))
+                variables.append(solver.IntVar(1, 1, player.id))
             elif player.ban:
-                variables.append(solver.IntVar(0, 0, player.name))
+                variables.append(solver.IntVar(0, 0, player.id))
             else:
-                variables.append(solver.IntVar(0, 1, player.name))
+                variables.append(solver.IntVar(0, 1, player.id))
 
         # maximize proj (fantasy points)
         objective = solver.Objective()
@@ -215,8 +233,8 @@ class NFLOptimizerDK(object):
             for player in lineup.sorted_players():
                 # lookup index of player in all_players
                 # then set coefficient of that index to 1
-                i = [i for i, p in enumerate(all_players) if p.name == player.name][0]
-                logging.info('added {} to diversity cap'.format(player.name))
+                i = [i for i, p in enumerate(all_players) if p.id == player.id][0]
+                logging.info('added {} to diversity cap'.format(player.id))
                 diversity_cap.SetCoefficient(variables[i], 1)
             logging.info(diversity_cap)
 
@@ -225,9 +243,9 @@ class NFLOptimizerDK(object):
         players = defaultdict(int)
         for lineup in existing_lineups:
             for player in lineup.players:
-                players[player.name] += 1
-        for player, val in players.items():
-            i = [i for i, p in enumerate(all_players) if p.name == player][0]
+                players[player.id] += 1
+        for pid, val in players.items():
+            i = [i for i, p in enumerate(all_players) if p.id == pid][0]
             player_cap.SetCoefficient(variables[i], val)
 
         # if solve, then return Roster object
@@ -242,7 +260,7 @@ class NFLOptimizerDK(object):
             logging.error("No solution :(")
         return roster
 
-    def optimize(self, all_players, n=5, max_score=500.0):
+    def optimize(self, all_players, n=5, max_score=500.0, solver_name='gurobi'):
         '''
         Generator for multiple simulations
 
@@ -256,7 +274,7 @@ class NFLOptimizerDK(object):
 
         '''
         for _ in range(n):
-            roster = self._optimize(all_players, max_score)
+            roster = self._optimize(all_players, max_score=max_score, solver_name=solver_name)
             max_score = roster.proj() - .01
             yield roster
 
