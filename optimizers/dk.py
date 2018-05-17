@@ -171,39 +171,84 @@ class NFLOptimizerDK(object):
             logging.error("No solution :(")
         return roster, solver, variables
 
-    def _optimize_diverse(self, solver, roster, variables,
-                          players, overlap, player_cap):
+    def _optimize_diverse(self, all_players, existing_lineups, solver_name,
+                          overlap=5, player_cap=50):
         '''
         Optimizes draftkings NFL team with diverse lineup constraints
 
         Args:
             all_players(list): of Player
-            roster(Roster): to add player constraints
-            variables(list):
-            players(dict): k str, v int
+            existing_lineups(list): of list of Player
+            solve_name(str): e.g. gurobi
             overlap(int): how many players can overlap, default 6
-            player_cap(int): max times player can be in lineup
 
         Returns:
             Roster
 
         '''
-        # start with existing solver instance
-        # add another constraint based on diversity
-        diversity_cap = solver.Constraint(0, overlap)
-        for player in roster.sorted_players():
-            # lookup index of player in all_players
-            # then set coefficient of that index to 1
-            i = [i for i, p in enumerate(variables) if p.id == player.id][0]
-            diversity_cap.SetCoefficient(variables[i], 1)
+        if solver_name.lower() == 'gurobi':
+            try:
+                solver = pywraplp.Solver('FD', pywraplp.Solver.GUROBI_MIXED_INTEGER_PROGRAMMING)
+            except:
+                logging.error('could not use Gurobi')
+                solver = pywraplp.Solver('FD', pywraplp.Solver.CBC_MIXED_INTEGER_PROGRAMMING)
+            else:
+                solver = pywraplp.Solver('FD', pywraplp.Solver.CBC_MIXED_INTEGER_PROGRAMMING)
 
-        # unclear how to do this - how do I reference existing constraints
+        variables = []
+
+        # locks and bans
+        for player in all_players:
+            if player.lock:
+                variables.append(solver.IntVar(1, 1, player.id))
+            elif player.ban:
+                variables.append(solver.IntVar(0, 0, player.id))
+            else:
+                variables.append(solver.IntVar(0, 1, player.id))
+
+        # maximize proj (fantasy points)
+        objective = solver.Objective()
+        objective.SetMaximization()
+        for i, player in enumerate(all_players):
+            objective.SetCoefficient(variables[i], player.proj)
+
+        # salary cap constraint
+        sal_cap = solver.Constraint(0, self.salary_cap)
+        for i, player in enumerate(all_players):
+            sal_cap.SetCoefficient(variables[i], player.sal)
+
+        # position limit constraints
+        for position, min_limit, max_limit in self.position_limits:
+            position_cap = solver.Constraint(min_limit, max_limit)
+            for i, player in enumerate(all_players):
+                if position == player.pos:
+                    position_cap.SetCoefficient(variables[i], 1)
+
+        # roster size constraint
+        size_cap = solver.Constraint(self.roster_size, self.roster_size)
+        for variable in variables:
+            size_cap.SetCoefficient(variable, 1)
+
+        # diversity cap constraint (useful if generating multiple lineups)
+        # can generate multiple lineups that don't overlap too much
+        for lineup in existing_lineups:
+            diversity_cap = solver.Constraint(0, overlap)
+            for player in lineup.sorted_players():
+                # lookup index of player in all_players
+                # then set coefficient of that index to 1
+                i = [i for i, p in enumerate(all_players) if p.id == player.id][0]
+                logging.info('added {} to diversity cap'.format(player.id))
+                diversity_cap.SetCoefficient(variables[i], 1)
+            logging.info(diversity_cap)
+
         # player cap constraint
         player_cap = solver.Constraint(0, player_cap)
-        for player in roster.players:
-            players[player.id] += 1
+        players = defaultdict(int)
+        for lineup in existing_lineups:
+            for player in lineup.players:
+                players[player.id] += 1
         for pid, val in players.items():
-            i = [i for i, p in enumerate(variables) if p == pid][0]
+            i = [i for i, p in enumerate(all_players) if p.id == pid][0]
             player_cap.SetCoefficient(variables[i], val)
 
         # if solve, then return Roster object
