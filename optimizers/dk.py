@@ -104,7 +104,9 @@ class NFLOptimizerDK(object):
             solve_name(str): e.g. 'Gurobi'
 
         Returns:
-            Roster
+            roster(Roster)
+            solver(pywraplp.Solver)
+            variables(list):
 
         '''
         if solver_name.lower() == 'gurobi':
@@ -152,9 +154,10 @@ class NFLOptimizerDK(object):
 
         # score cap constraint (useful if generating multiple lineups)
         # can generate multiple lineups if have cap on lineup score
-        score_cap = solver.Constraint(0, max_score)
-        for i, player in enumerate(all_players):
-            score_cap.SetCoefficient(variables[i], player.proj)
+        if max_score:
+            score_cap = solver.Constraint(0, max_score)
+            for i, player in enumerate(all_players):
+                score_cap.SetCoefficient(variables[i], player.proj)
 
         # if solve, then return Roster object
         # otherwise, return None
@@ -166,86 +169,41 @@ class NFLOptimizerDK(object):
                     roster.add_player(player)
         else:
             logging.error("No solution :(")
-        return roster
+        return roster, solver, variables
 
-    def _optimize_diverse(self, all_players, existing_lineups, solver_name,
-                          overlap=5, player_cap=50):
+    def _optimize_diverse(self, solver, roster, variables,
+                          players, overlap, player_cap):
         '''
         Optimizes draftkings NFL team with diverse lineup constraints
 
         Args:
             all_players(list): of Player
-            existing_lineups(list): of list of Player
-            solve_name(str): e.g. gurobi
+            roster(Roster): to add player constraints
+            variables(list):
+            players(dict): k str, v int
             overlap(int): how many players can overlap, default 6
+            player_cap(int): max times player can be in lineup
 
         Returns:
             Roster
 
         '''
-        if solver_name.lower() == 'gurobi':
-            try:
-                solver = pywraplp.Solver('FD', pywraplp.Solver.GUROBI_MIXED_INTEGER_PROGRAMMING)
-            except:
-                logging.error('could not use Gurobi')
-                solver = pywraplp.Solver('FD', pywraplp.Solver.CBC_MIXED_INTEGER_PROGRAMMING)
-            else:
-                solver = pywraplp.Solver('FD', pywraplp.Solver.CBC_MIXED_INTEGER_PROGRAMMING)
+        # start with existing solver instance
+        # add another constraint based on diversity
+        diversity_cap = solver.Constraint(0, overlap)
+        for player in roster.sorted_players():
+            # lookup index of player in all_players
+            # then set coefficient of that index to 1
+            i = [i for i, p in enumerate(variables) if p.id == player.id][0]
+            diversity_cap.SetCoefficient(variables[i], 1)
 
-        variables = []
-
-        # locks and bans
-        for player in all_players:
-            if player.lock:
-                variables.append(solver.IntVar(1, 1, player.id))
-            elif player.ban:
-                variables.append(solver.IntVar(0, 0, player.id))
-            else:
-                variables.append(solver.IntVar(0, 1, player.id))
-
-        # maximize proj (fantasy points)
-        objective = solver.Objective()
-        objective.SetMaximization()
-        for i, player in enumerate(all_players):
-            objective.SetCoefficient(variables[i], player.proj)
-
-        # salary cap constraint
-        sal_cap = solver.Constraint(0, self.salary_cap)
-        for i, player in enumerate(all_players):
-            sal_cap.SetCoefficient(variables[i], player.sal)
-
-        # position limit constraints
-        for position, min_limit, max_limit in self.position_limits:
-            position_cap = solver.Constraint(min_limit, max_limit)
-            for i, player in enumerate(all_players):
-                if position == player.pos:
-                    position_cap.SetCoefficient(variables[i], 1)
-
-        # roster size constraint
-        size_cap = solver.Constraint(self.roster_size, self.roster_size)
-        for variable in variables:
-            size_cap.SetCoefficient(variable, 1)
-
-        # diversity cap constraint (useful if generating multiple lineups)
-        # can generate multiple lineups that don't overlap too much
-        for lineup in existing_lineups:
-            diversity_cap = solver.Constraint(0, overlap)
-            for player in lineup.sorted_players():
-                # lookup index of player in all_players
-                # then set coefficient of that index to 1
-                i = [i for i, p in enumerate(all_players) if p.id == player.id][0]
-                logging.info('added {} to diversity cap'.format(player.id))
-                diversity_cap.SetCoefficient(variables[i], 1)
-            logging.info(diversity_cap)
-
+        # unclear how to do this - how do I reference existing constraints
         # player cap constraint
         player_cap = solver.Constraint(0, player_cap)
-        players = defaultdict(int)
-        for lineup in existing_lineups:
-            for player in lineup.players:
-                players[player.id] += 1
+        for player in roster.players:
+            players[player.id] += 1
         for pid, val in players.items():
-            i = [i for i, p in enumerate(all_players) if p.id == pid][0]
+            i = [i for i, p in enumerate(variables) if p == pid][0]
             player_cap.SetCoefficient(variables[i], val)
 
         # if solve, then return Roster object
@@ -275,6 +233,30 @@ class NFLOptimizerDK(object):
         '''
         for _ in range(n):
             roster = self._optimize(all_players, max_score=max_score, solver_name=solver_name)
+            max_score = roster.proj() - .01
+            yield roster
+
+    def optimize_diverse(self, all_players, n=5, solver_name='gurobi',
+                         overlap=5, player_cap=50):
+        '''
+        Generator for multiple simulations
+
+        Args:
+            all_players(list): of Player
+            n(int): number of Roster
+            solver_name(str): 'gurobi', 'cbc', etc.
+        Returns:
+            Roster
+
+        '''
+
+        # seed the process by getting the optimal lineup
+        roster, solver, variables = self._optimize(all_players=all_players, max_score=None, solver_name=solver_name)
+
+        # now go through and reuse the solver + constraints
+        # then only need to add newest lineup to the mix
+        for i in range(n - 1):
+            roster, solver = self._optimize_diverse(solver, roster, variables)
             max_score = roster.proj() - .01
             yield roster
 
