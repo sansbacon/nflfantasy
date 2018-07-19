@@ -1,13 +1,16 @@
 # -*- coding: utf-8 -*-
 
-from bs4 import BeautifulSoup
+from collections import defaultdict
 import logging
 import math
 import re
 import xml.etree.ElementTree as ET
 
+from bs4 import BeautifulSoup
+from requests_html import HTML
 
-class FantasyFootballCalculatorParser():
+
+class FFCParser():
     '''
     Parses html of NFL fantasy projections page of fantasycalculator.com into player dictionaries
 
@@ -158,6 +161,74 @@ class FantasyFootballCalculatorParser():
                 self.logger.info('excluded %s because %s' % (player.get('full_name'), player.get('position')))
 
         return players
+
+    def draftboard(self, content):
+        '''
+        Parses HTML draftboard
+
+        Args:
+            content(str): HTML page
+
+        Returns:
+            dict
+
+        '''
+        html = HTML(html=content)
+
+        # draft metadata
+        # format, draft #, time/date
+        draft = {}
+        fmts = {'PPR Mock Draft': 'ppr',
+                '2-QB Mock Draft': '2qb',
+                'Standard Mock Draft': 'std',
+                'Dynasty Mock Draft': 'dyn'}
+        h1 = html.find('h1', first=True)
+        draft['fmt'] = fmts.get(h1.text)
+        for p in html.find('p'):
+            if 'Draft #' in p.text:
+                draft['dn'], draft['td'] = [item.strip() for item in p.text.split('; ')]
+                break
+
+        # get number/type of teams
+        thead = html.find('#draftboardHead', first=True)
+        drafters = {}
+        for th in thead.find('tr', first=True).find('th'):
+            if 'roundColBlank' in th.attrs.get('class', ''):
+                continue
+            elif th.text not in [str(i) for i in range(0, 15)]:
+                continue
+            elif 'computer' in th.attrs.get('class', ''):
+                drafters[int(th.text)] = 'computer'
+            else:
+                drafters[int(th.text)] = 'human'
+        draft['drafters'] = drafters
+
+        # now go through picks
+        # first cell in row is round number
+        # then each cell after that is a single pick
+        picks = defaultdict(dict)
+        patt = re.compile('\(([A-Z]+)\)')
+        for rnd, tr in enumerate(html.find('#draftboardBody', first=True).find('tr')):
+            for idx, td in enumerate(tr.find('td')):
+                if idx == 0:
+                    round = int(td.text)
+                else:
+                    a = td.find('a', first=True)
+                    p = {'name': a.attrs.get('title'),
+                         'href': a.attrs.get('href'),
+                         'pos': td.attrs.get('class')[0]}
+
+                    # team is *current* team, not the team
+                    # at the time of the draft
+                    # will have to backfill this but it could
+                    # be useful for matching purposes
+                    match = re.search(patt, td.text)
+                    if match:
+                        p['current_team'] = match.group(1)
+                    picks[rnd + 1][idx] = p
+        draft['picks'] = picks
+        return draft
+
 
 if __name__ == '__main__':
     pass

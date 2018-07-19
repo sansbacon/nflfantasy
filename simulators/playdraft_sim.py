@@ -14,7 +14,7 @@ import random
 import numpy as np
 import pandas as pd
 
-from nfl.utility import getengine
+from nfl.utility import getdb
 
 
 logging.getLogger(__name__).addHandler(logging.NullHandler())
@@ -23,6 +23,10 @@ position_slots = {'QB': [1,3], 'RB': [2,6],
 
 
 def six_team_league():
+    """
+
+    Returns:
+
     """
     # setup, have 6 teams
     nteams = 6
@@ -88,7 +92,7 @@ def six_team_league():
                     team_results[team_id]['Positions'] = team['Positions']
 
     pprint.pprint(sorted(list(team_results.values()), key=itemgetter('Total'), reverse=True))
-    """
+
 
 
 def get_data():
@@ -100,15 +104,14 @@ def get_data():
 
     '''
 
-    eng = getengine()
-    q = """SELECT * FROM extra_fantasy.vw_fantasy_gamelogs"""
-    df = pd.read_sql_query(q, eng)
-    df = df[np.isfinite(df['fpts'])]
+    db = getdb('nfl')
+    q = """SELECT * FROM fantasy.vw_fgl WHERE fpts IS NOT NULL"""
+    df = pd.read_sql(q, db.conn)
+    df.fpts = df.fpts.fillna(0)
+    df['fpts'] = df['fpts'].astype(np.float16)
     df['year'] = df['year'].astype(np.int16)
     df['week'] = df['week'].astype(np.int8)
     df['posrk'] = df['posrk'].astype(np.int16)
-    df['fpts'] = df['fpts'].astype(np.float16)
-    df['full_name'] = df['plyr']
     df['plyr'] = df.apply(lambda x: x['plyr'] + '_' + str(x['year']), axis=1)
     return df
 
@@ -143,7 +146,7 @@ def n_players(df, pos, n, distribution):
         for i in range(n):
             min = pos_dist[i]
             max = pos_dist[i+2]
-            pool = df[(df['posrk'] >= min) & (df['posrk'] <= max)]
+            pool = df[(df['posrk'] >= min) & (df['posrk'] <= max) & (df['pos'] == pos.upper())]
             random_player = df.loc[random.choice(pool.index)]['plyr']
             results.append(pool[pool['plyr'] == random_player])
 

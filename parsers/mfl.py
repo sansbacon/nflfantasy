@@ -4,8 +4,6 @@ from __future__ import absolute_import, print_function, division
 
 import logging
 
-from bs4 import BeautifulSoup
-
 
 class MFLParser(object):
     '''
@@ -21,18 +19,33 @@ class MFLParser(object):
         '''
         logging.getLogger(__name__).addHandler(logging.NullHandler())
 
-    def players (self, content):
+    def adp(self, content):
         '''
-        Parses xml and returns list of player dictionaries
-        
+        Parses response and returns list of player dictionaries
+
         Args:
-            content (str): xml typically fetched by Scraper class
-        
+            content (dict): parsed json
+
         Returns:
             List of dictionaries if successful, empty list otherwise.
+
         '''
-        soup = BeautifulSoup(content, 'xml')
-        return [{att: p[att] for att in p.attrs} for p in soup.find_all('player')]
+        return content['adp']['player']
+
+
+    def players (self, content):
+        '''
+        Parses response and returns list of player dictionaries
+
+        Args:
+            content (dict): parsed json
+
+        Returns:
+            List of dictionaries if successful, empty list otherwise.
+
+        '''
+        return content['players']['player']
+
 
 if __name__ == '__main__':
     pass

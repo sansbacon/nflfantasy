@@ -19,12 +19,11 @@ class Player(object):
         self.pos = opts['pos'].upper()
         self.team = opts['team'].upper()
         self.proj = float(opts['proj'])
-        self.lock = int(opts.get('lock', 0)) > 0
-        self.ban = int(opts.get('lock', 0)) < 0
+        self.rounds = opts['rounds']
 
     def __repr__(self):
-        return "[{0: <2}] {1: <20}(${2}, {3}) {4}".format(
-            self.pos, self.name, self.sal, self.proj, "LOCK" if self.lock else "")
+        return "[{0: <2}] {1: <20}({2})".format(
+            self.pos, self.name, self.proj)
 
 
 class Roster(object):
@@ -65,7 +64,7 @@ class NFLOptimizerDraftBestball(object):
 
     '''
 
-    def __init__(self, roster_size=18, position_limits=(("QB", 1, 3),("RB", 5, 8),("WR", 5, 8),("TE", 2, 3))):
+    def __init__(self, roster_size=18, position_limits=(("QB", 1, 3),("RB", 5, 8),("WR", 5, 8),("TE", 2, 4))):
         '''
         NFLOptimizerDraftBestball object
 
@@ -77,6 +76,7 @@ class NFLOptimizerDraftBestball(object):
         logging.getLogger(__name__).addHandler(logging.NullHandler())
         self.roster_size = roster_size
         self.position_limits = position_limits
+
 
     def _optimize(self, all_players):
         '''
@@ -95,14 +95,9 @@ class NFLOptimizerDraftBestball(object):
         # locks and bans
         # can use these to optimize when I've already made a few picks
         for player in all_players:
-            if player.lock:
-                variables.append(solver.IntVar(1, 1, player.name))
-            elif player.ban:
-                variables.append(solver.IntVar(0, 0, player.name))
-            else:
-                variables.append(solver.IntVar(0, 1, player.name))
+            variables.append(solver.IntVar(0, 1, player.name))
 
-        # maximize proj (surplus value)
+        # maximize proj
         objective = solver.Objective()
         objective.SetMaximization()
         for i, player in enumerate(all_players):
@@ -115,19 +110,25 @@ class NFLOptimizerDraftBestball(object):
                 if position == player.pos:
                     position_cap.SetCoefficient(variables[i], 1)
 
+        # round constraints
+        # idea is that constraint decreases from 18 to 1
+        # as the draft progresses
+        # that is, a player that you would draft in round 2 would
+        # not be available in round 3
+        # downside is that you don't draft players early but can adjust
+        # for that by setting probability threshold lower
+        for round in range(1, self.roster_size + 1):
+            cap = self.roster_size + 1 - round
+            round_cap = solver.Constraint(cap, cap)
+            for i, player in enumerate(all_players):
+                if round in player.rounds:
+                    round_cap.SetCoefficient(variables[i], 1)
+
         # roster size constraint
         size_cap = solver.Constraint(self.roster_size, self.roster_size)
         for variable in variables:
             size_cap.SetCoefficient(variable, 1)
 
-        # need to add constraint for rounds 1-18
-        # not sure how to model this
-        # may want to pick player with 16th round ADP in 13th round
-
-        # need to add constraint can only choose player once
-        #player_cap = solver.Constraint(0, 1)
-        #for i, player in enumerate(all_players):
-        #    position_cap.SetCoefficient(variables[i], 1)
 
         # if solve, then return Roster object
         # otherwise, return None
@@ -140,6 +141,7 @@ class NFLOptimizerDraftBestball(object):
         else:
             logging.error("No solution :(")
         return roster
+
 
     def optimize(self, all_players, n=1):
         '''
@@ -156,6 +158,7 @@ class NFLOptimizerDraftBestball(object):
         for _ in range(n):
             roster = self._optimize(all_players)
             yield roster
+
 
 if __name__ == '__main__':
     pass

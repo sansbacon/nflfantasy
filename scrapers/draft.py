@@ -1,7 +1,5 @@
 # -*- coding: utf-8 -*-
 
-from __future__ import absolute_import, print_function, division
-
 import json
 
 from nflmisc.scraper import FootballScraper
@@ -16,72 +14,69 @@ class DraftNFLScraper(FootballScraper):
         Opens JSON file from disk
 
         Args:
-            fn: 
+            fn:
 
         Returns:
             dict: JSON parsed into dict
-            
+
         '''
         with open(fn, 'r') as infile:
             return json.load(infile)
 
-    def adp(self, headers=None, fn=None):
+    def complete_contests(self, fn=None):
         '''
 
         Args:
-            headers (dict): 
+            fn (str):
 
         Returns:
             dict
 
         '''
-        if headers and not fn:
-            url = 'https://api.playdraft.com/v4/player_pool/11416'
-            self.headers = headers
-            return self.get_json(url=url)
-        elif fn and not headers:
+        if fn:
             return self._json_file(fn)
         else:
-            raise ValueError('Must pass headers or fn')
-
-    def complete_cases(self, headers, fn):
-        '''
-    
-        Args:
-            headers (dict): 
-    
-        Returns:
-            dict
-    
-        '''
-        if headers and not fn:
             url = 'https://api.playdraft.com/v1/window_clusters/2015/complete_contests'
-            self.headers = headers
             return self.get_json(url=url)
-        elif fn and not headers:
-            return self._json_file(fn)
-        else:
-            raise ValueError('Must pass headers or fn')
 
-    def draft(self, headers, fn):
+    def draft(self, league_id=None, fn=None):
         '''
-    
+
         Args:
-            headers (dict): 
-    
+            league_id (str):
+            fn (str):
+
         Returns:
             dict
-    
+
         '''
-        if headers and not fn:
-            url = 'https://api.playdraft.com/v1/window_clusters/2015/complete_contests'
-            self.headers = headers
-            return self.get_json(url=url)
-        elif fn and not headers:
+        if fn:
             return self._json_file(fn)
+        elif league_id:
+            url = 'https://api.playdraft.com/v3/drafts/{}'
+            return self.get_json(url=url.format(league_id))
         else:
-            raise ValueError('Must pass headers or fn')
+            return ValueError('must specify league_id or fn')
+
+    def player_pool(self, pool_id=None, fn=None):
+        '''
+
+        Args:
+            fn (dict):
+
+        Returns:
+            dict
+
+        '''
+        if fn:
+            return self._json_file(fn)
+        elif pool_id:
+            url = 'https://api.playdraft.com/v4/player_pool/{}'
+            return self.get_json(url.format(pool_id))
+        else:
+            return ValueError('must specify pool_id or fn')
 
 
 if __name__ == "__main__":
     pass
+

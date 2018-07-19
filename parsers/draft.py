@@ -11,39 +11,6 @@ class DraftNFLParser(object):
         '''
         '''
         logging.getLogger(__name__).addHandler(logging.NullHandler())
-        self.pickd = {'season_year': 'season_year',
-                      'draft_id': 'draft_id',
-                      'draft_roster_id': 'draft_roster_id',
-                      'booking_id': 'booking_id',
-                      'player_id': 'player_id',
-                      'first_name': 'first_name',
-                      'last_name': 'last_name',
-                      'team_abbr': 'team_abbr',
-                      'position': 'position',
-                      'pick_order': 'pick_order',
-                      'pick_number': 'pick_number',
-                      'slot_id': 'slot_id',
-                      'user_id': 'user_id',
-                      'username': 'username',
-                      'experienced': 'user_experienced',
-                      'skill_level': 'user_skill_level'}
-
-    def _bookings_convertk(self, k):
-        '''
-        Converts keys in dict
-
-        Args:
-            k (str): dictionary key
-
-        Returns:
-            str: new dictionary key
-
-        '''
-        _convertd = {'id': 'booking_id'}
-        if _convertd.get(k):
-            return _convertd.get(k)
-        else:
-            return k
 
     def _combine_bookings_players(self, bookings, players):
         '''
@@ -61,30 +28,22 @@ class DraftNFLParser(object):
 
         # go through bookings first
         # create bookings dict with player_id: player_dict
-        b_wanted = ['id', 'player_id', 'adp', 'position_id', 'projected_points']
-        bd = {b['player_id']: {self._bookings_convertk(k): v for k, v in b.items() if k in b_wanted}
-              for b in bookings}
+        b_wanted = ['id', 'player_id', 'booking_id', 'adp', 'position_id', 'projected_points']
+        bookingsd = {}
+        for b in bookings:
+            pid = b['player_id']
+            bd = {k: v for k, v in b.items() if k in b_wanted}
+            bd['booking_id'] = bd.pop('id')
+            bookingsd[pid] = bd
+
         # now try to match up with players
         p_wanted = ['first_name', 'last_name', 'team_id', 'injury_status']
         for p in players:
-            match = bd.get(p['id'])
+            match = bookingsd.get(p['id'])
             if match:
                 merged.append(merge_two(match, {k: v for k, v in p.items()
                                                 if k in p_wanted}))
         return merged
-
-    def _posd(self, positions):
-        '''
-        Creates posd (id: position)
-
-        Args:
-            positions (list): 
-
-        Returns:
-            dict
-
-        '''
-        return {int(pos['id']): pos['name'] for pos in positions}
 
     def _teams(self, teams):
         '''
@@ -102,62 +61,67 @@ class DraftNFLParser(object):
         self.teamsd = {t['id']: t['abbr'] for t in self.teams}
         return (self.teams, self.teamsd)
 
-    def _users(self, users):
-        '''
-        Creates list users and usersd (id: user)
-
-        Args:
-            users (list): 
-
-        Returns:
-            tuple
-
-        '''
-        uwanted = ['experienced', 'id', 'skill_level', 'username']
-        users = [{k: v for k, v in user.items() if k in uwanted}
-                      for user in users]
-        usersd = {u['id']: u for u in users}
-        return (users, usersd)
-
     def complete_contests(self, cc, season_year):
         '''
         Parses complete_contests resource. Does not get list of draft picks.
-        
+
         Args:
             cc (dict): complete contests json file
             season_year (int): 2018, etc.
-            
+
         Returns:
             list: of contest dict
 
         '''
-        return [{'prize': float(dr['prize']),
+        return [{'prize': float(dr['prize']), 'player_pool_id': dr['time_window_id'],
                  'entry_cost': float(dr['entry_cost']),
-                 'start_time': dr['start_time'],
-                 'draft_id': dr['id'], 'season_year': season_year,
-                 'draft_json': dr} for dr in cc['drafts']]
+                 'draft_time': dr['draft_time'],
+                 'participants': dr['max_participants'],
+                 'league_id': dr['id'], 'season_year': season_year,
+                 'league_json': dr} for dr in cc['drafts']]
 
-    def draft(self, dr, season_year):
+    def draft_users(self, draft):
         '''
-        Parses single draft resource
-        
+        Parses single draft resource into users and user_league
+
         Args:
-            dr (dict):
-            season_year (int): 2018, etc.
+            draft (dict):
+
+        Returns:
+            tuple: (list of dict, list of dict)
+            
+        '''
+        if draft.get('draft'):
+            draft = draft['draft']
+        uwanted = ['experienced', 'id', 'skill_level', 'username']
+        users = [{k: v for k, v in user.items() if k in uwanted}
+                 for user in draft['users']]
+        league_users = [{'league_id': draft['id'],
+                 'user_id': dr['user_id'],
+                 'pick_order': dr['pick_order']}
+                for dr in draft['draft_rosters']]
+        return users, league_users
+
+    def draft_picks(self, draft):
+        '''
+        Parses single draft resource into picks
+
+        Args:
+            draft (dict):
 
         Returns:
             list: of dict
-
+            
         '''
         picks = []
-        draft_id = dr['id']
-        teams, teamsd = self._teams(dr['teams'])
-        posd = self._posd(dr['positions'])
-        users, usersd = self._users(dr['users'])
+        if draft.get('draft'):
+            draft = draft['draft']
+        teams, teamsd = self._teams(draft['teams'])
+        posd = {int(pos['id']): pos['name'] for pos in draft['positions']}
 
         # players
         players = []
-        for p in self._combine_bookings_players(dr['bookings'], dr['players']):
+        for p in self._combine_bookings_players(draft['bookings'], draft['players']):
             tid = p.get('team_id')
             if tid:
                 p['team_abbr'] = teamsd.get(tid, 'FA')
@@ -171,14 +135,12 @@ class DraftNFLParser(object):
         player_bookings_d = {p['booking_id']: p for p in players}
 
         # picks
-        rosters = dr['draft_rosters']
+        rosters = draft['draft_rosters']
         pkwanted = ['booking_id', 'id', 'draft_roster_id', 'pick_number', 'slot_id']
         for t in rosters:
             for pick in [{k: v for k, v in pk.items() if k in pkwanted} for pk in t['picks']]:
                 pick['user_id'] = t['user_id']
-                pick['season_year'] = season_year
-                pick['draft_id'] = draft_id
-                pick['pick_order'] = t['pick_order']
+                pick['league_id'] = draft['id']
 
                 # add player data
                 match = player_bookings_d.get(pick['booking_id'])
@@ -186,18 +148,7 @@ class DraftNFLParser(object):
                     pickc = merge_two(pick, match)
                 else:
                     logging.info('no bookings match for {}'.format(pickc))
-
-                # add user data
-                match = usersd.get(pickc['user_id'])
-                if match:
-                    pickc = merge_two(pickc, match)
-                else:
-                    print('no user match for {}'.format(pickc))
-
-                # now fix keys
-                pickc = {self.pickd[k]: v for k, v in pickc.items() if self.pickd.get(k)}
                 picks.append(pickc)
-
         return picks
 
     def player_pool(self, pp, pool_date):
@@ -221,11 +172,11 @@ class DraftNFLParser(object):
         player_pool_id = pp['id']
 
         teams, teamsd = self._teams(pp['teams'])
-        posd = self._posd(pp['positions'])
+        posd = {int(pos['id']): pos['name'] for pos in pp['positions']}
 
         # loop through booking + player and add fields
         players = []
-        ppwanted = ['adp', 'first_name', 'last_name', 'player_id', 'pool_date',
+        ppwanted = ['adp', 'first_name', 'last_name', 'player_id', 'pool_date', 'booking_id',
                     'season_year', 'player_pool_id', 'position', 'team', 'projected_points']
         for pl in self._combine_bookings_players(pp['bookings'], pp['players']):
             pl['player_pool_id'] = player_pool_id
@@ -233,9 +184,9 @@ class DraftNFLParser(object):
             pl['team'] = teamsd.get(pl['team_id'], 'FA')
             pl['pool_date'] = pool_date
             pl['season_year'] = int(pool_date[0:4])
-            players.append({k:v for k,v in pl.items() if k in ppwanted})
-
+            players.append({k: v for k, v in pl.items() if k in ppwanted})
         return players
+
 
 class DraftCSVParser(object):
     '''
