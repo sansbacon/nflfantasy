@@ -61,6 +61,18 @@ class DraftNFLParser(object):
         self.teamsd = {t['id']: t['abbr'] for t in self.teams}
         return (self.teams, self.teamsd)
 
+    def adp(self, content):
+        '''
+
+        Args:
+            content:
+
+        Returns:
+            list: of dict (name, team, adp, sportradar_id, min_pick, max_pick, position)
+
+        '''
+        return content['average_draft_positions']
+
     def complete_contests(self, cc, season_year):
         '''
         Parses complete_contests resource. Does not get list of draft picks.
