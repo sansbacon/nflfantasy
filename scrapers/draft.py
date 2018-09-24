@@ -23,30 +23,6 @@ class DraftNFLScraper(FootballScraper):
         with open(fn, 'r') as infile:
             return json.load(infile)
 
-    def adp(self, start_date, end_date, season_year, participants, entry_cost, token):
-        '''
-
-        Args:
-            start_date:
-            end_date:
-            season_year:
-            participants:
-            entry_cost:
-            token:
-
-        Returns:
-            dict
-
-        '''
-        url = 'https://api.playdraft.com/feeds/v2/sports/nfl//season/adp?'
-        params = {'start_date': start_date,
-                  'end_date': end_date,
-                  'year': season_year,
-                  'participants': participants,
-                  'entry_cost': entry_cost,
-                  'token': token}
-        return self.get_json(url, params)
-
     def complete_contests(self, fn=None):
         '''
 

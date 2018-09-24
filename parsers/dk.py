@@ -4,7 +4,6 @@ from __future__ import absolute_import, print_function, division
 
 from csv import reader
 import datetime
-import json
 import logging
 
 
@@ -16,99 +15,6 @@ class DraftKingsNFLParser(object):
         '''
         '''
         logging.getLogger(__name__).addHandler(logging.NullHandler())
-
-    def _team_id_to_code(self, id):
-        d = {324: 'BUF',  325: 'HOU',  326: 'CHI',  327: 'CIN',  329: 'CLE',  331: 'DAL',
-                 332: 'DEN',  334: 'DET',  335: 'GB',  336: 'TEN',  338: 'IND',  339: 'KC',
-                 341: 'OAK',  343: 'LAR',  345: 'MIA',  347: 'MIN',  348: 'NE',  350: 'NO',
-                 351: 'NYG',  354: 'PHI',  355: 'ARI',  356: 'PIT',  357: 'LAC',  359: 'SF',
-                 361: 'SEA',  362: 'TB',  363: 'WAS',  364: 'CAR',  365: 'JAX',  366: 'BAL'}
-        return d.get(id)
-
-    def depth_chart(self, content):
-        '''
-        Parses DK depth chart
-
-        Args:
-            content: parsed JSON
-
-        Returns:
-            list: of dict
-
-        '''
-        players = []
-
-        # tdc is list with 2 elements (one for each team)
-        # each team is dict with 2 keys: teamId and depthCharts
-        # each depth chart is a list with elements for each position ("QB", etc.)
-        # each position is dict with keys: positionAbbreviation, positionName, teamDepthChartPlayers
-        # teamDepthChartPlayers is a list of dict
-        # each dict has keys: rank, playerId, firstName, lastName, shortName, playerAttributes, draftableGroupings
-        # playerAttributes is list (seems empty)
-        # draftableGroupings is list of dict (seems like for different slates)
-        # each draftableGrouping has keys: salary, rosterPositionName, draftableRosterPositions
-        # draftableRosterPositions is list of dict, each has keys: draftableId, rosterPositionId
-        for t in content['teamDepthCharts']:
-            tc = self._team_id_to_code(t['teamId'])
-            for posdepth in t['depthCharts']:
-                pos =  posdepth.get('positionAbbreviation')
-                for pl in posdepth.get('teamDepthChartPlayers'):
-                    sal = pl.get('draftableGroupings')[0].get('salary')
-                    players.append([pl['rank'], pl['firstName'], pl['lastName'], tc, pos, sal])
-        return players
-
-    def _dk_game(self, g):
-        '''
-        Parses dk game description
-        TODO: figure out what this does
-
-        Args:
-            g(str):
-
-        Returns:
-            dict
-
-        Examples:
-            5523905 NO @ JAX
-            5523912 CHI @ CIN
-            5523920 CLE @ NYG
-            5523921 DAL @ SF
-            5523929 TB @ MIA
-            5523933 HOU @ KC
-            5523937 WAS @ NE
-            5523950 TEN @ GB
-            5523953 CAR @ BUF
-            5523957 LAR @ BAL
-            5523960 IND @ SEA
-            5523961 PIT @ PHI
-        '''
-
-        td = {}
-        d = json.loads(g)
-        for g in d['draftGroup']['games']:
-            atid = g['awayTeamId']
-            htid = g['homeTeamId']
-            a, h = g['description'].split(' @ ')
-            td[atid] = a
-            td[htid] = h
-        return td
-
-    def draft_groups(self, content):
-        '''
-        Draft groups from contests page
-
-        Args:
-            content (str): stringified javascript variable
-
-        Returns:
-            dict
-
-        '''
-        games = []
-        dg = json.loads(content)
-        for g in dg['draftGroup']['games']:
-            games.append([g['gameId'], g['description']])
-        return games
 
     def slate_entries(self, fn):
         '''

@@ -16,22 +16,6 @@ class DraftKingsNFLScraper(object):
     def __init__(self):
         self.contest_fn = None
 
-    def draft_groups(self, dgid, compid):
-        '''
-        Gets dk draft group
-
-        Args:
-            dgid(int): dk draftgroup id
-            compid(int): dk competition id
-
-        Returns:
-            dict: parsed JSON
-
-        '''
-        base_url = ('https://api.draftkings.com/draftgroups/v2/draftgroups/{}/'
-                    'competitions/{}/depthchart?format=json')
-        return self.get_json(base_url.format(dgid, compid))
-
     def contest_data(self, fname):
         '''
         Uses memory map instead of file_io to process DK contest results
