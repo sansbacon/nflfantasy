@@ -2,16 +2,20 @@ import json
 import logging
 import time
 
+import click
+
 from nfl.scrapers.espn import ESPNNFLScraper
 from nfl.parsers.espn import ESPNNFLParser
 
-def run(fn=None):
+@click.command()
+@click.option('--filename', default=None, help='file to save')
+def run(filename):
     scraper = ESPNNFLScraper(cache_name='Watson')
     players = scraper.watson_players()
     parser = ESPNNFLParser()
 
     projections = []
-    for item in parser.watson_players(players):
+    for item in parser.watson_players(players)[0:2]:
         try:
             pid = item.get('playerid')
             content = scraper.watson(pid)
@@ -25,11 +29,12 @@ def run(fn=None):
         except:
             logging.exception('no pid: {}'.format(item))
 
-    if fn:
-        with open(fn, 'w') as outfile:
+    if filename:
+        with open(filename, 'w') as outfile:
             json.dump(projections, outfile)
     return projections
 
+
 if __name__ == '__main__':
     logging.basicConfig(level=logging.INFO)
-    run('/home/sansbacon/watson/w17projections.json')
+    run()
