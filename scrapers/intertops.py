@@ -21,6 +21,7 @@ class IntertopsNFLScraper(FootballScraper):
             delay: int (be polite!!!)
             expire_hours: int - default 168
             as_string: get string rather than parsed json
+
         '''
         FootballScraper.__init__(self, headers, cookies, cache_name, delay, expire_hours, as_string)
         self.api_key = api_key
@@ -32,6 +33,7 @@ class IntertopsNFLScraper(FootballScraper):
 
         Returns:
             dict
+
         """
         url = 'http://xmlfeed.intertops.com/xmloddsfeed/v2/{fmt}/categoryfeed.ashx'
         params = {'apikey': self.api_key, 'sportId': 1}
@@ -42,16 +44,18 @@ class IntertopsNFLScraper(FootballScraper):
         Gets odds from intertops
         Have to be careful with delta parameter because could miss info otherwise but, if poll too often,
         site TOS states that it may revoke your API key.
-        
+
         Args:
             delta: int, number of minutes since last update. You need to be careful with this per site TOS.
 
         Returns:
             dict
+
         """
         url = 'http://xmlfeed.intertops.com/xmloddsfeed/v2/{fmt}/feed.ashx'
         params = {'apikey': self.api_key, 'sportId': 1}
         return self.get_json(url.format(fmt=self.response_format, api_key=self.api_key), payload=params)
+
 
 if __name__ == "__main__":
     pass
