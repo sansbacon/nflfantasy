@@ -60,7 +60,7 @@ class MFLScraper(FootballScraper):
             dict: parsed json
 
         '''
-        url = 'http://www03.myfantasyleague.com/{}/export?TYPE=players&DETAILS=1&JSON=1'
+        url = 'http://www03.myfantasyleague.com/{}/export?TYPE=players&SINCE=&DETAILS=1&JSON=1'
         return self.get_json(url.format(season_year))
 
 

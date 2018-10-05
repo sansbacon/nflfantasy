@@ -5,8 +5,9 @@ import random
 import sys
 import unittest
 
+import pandas as pd
 import feather
-from pydfs_lineup_optimizer import LineupOptimizer
+from pydfs_lineup_optimizer import LineupOptimizer, Player
 
 from nfl.utility import getdb
 from nflfantasy.pipelines import ffa
@@ -54,6 +55,10 @@ class Ffa_pipeline_test(unittest.TestCase):
         return '{}_w{}_ffa-{}proj.feather'.format(self.season_year,
                                               self.week, self.source)
     @property
+    def pos(self):
+        return random.choice(['QB', 'WR', 'TE', 'RB'])
+
+    @property
     def projfeather(self):
         return self.projdir / 'ffa' / self.fn
 
@@ -74,10 +79,26 @@ class Ffa_pipeline_test(unittest.TestCase):
         col = self.col
         self.assertTrue(col in df.columns, 'Should have {} column'.format(col))
 
+    def test_keyd(self):
+        keyd = ffa._keyd(self.db, self.season_year, self.week, self.source)
+        self.assertIsInstance(keyd, dict)
+        self.assertGreater(len(list(keyd.keys())), 0)
+
+    def test_mfld(self):
+        keyd = ffa._mfld(self.db, self.season_year, self.week, self.source)
+        self.assertIsInstance(keyd, dict)
+        self.assertGreater(len(list(keyd.keys())), 0)
+        self.assertIsInstance(list(keyd.keys())[0], int)
+
     def test_name_fix(self):
         df = self.df
         df['full_name'] = df.apply(lambda x: ffa._name_fix(x), axis=1)
         self.assertTrue('full_name' in df.columns)
+
+    def test_fix_fdpos(self):
+        self.assertEqual(ffa._fix_fdpos('DST'), 'D')
+        pos = self.pos
+        self.assertEqual(ffa._fix_fdpos(pos), pos)
 
     def test_ffa_to_dk_teams(self):
         df = self.df
@@ -116,7 +137,7 @@ class Ffa_pipeline_test(unittest.TestCase):
         df = self.clean_df
         df = ffa.add_salaries(df=df, db=self.db, source=self.source,
                               season_year=self.season_year, week=self.week)
-        players = ffa.df_to_players(df)
+        players = ffa.df_to_players(df, self.source)
         self.assertTrue(len(players) > 0)
 
     def test_optimizer_factory(self):
@@ -125,11 +146,22 @@ class Ffa_pipeline_test(unittest.TestCase):
                           self.season_year, self.week, False)
         self.assertTrue(df['salary'].isna().sum() == 0)
         self.assertTrue(len(df.query('salary > 5000')) > 0)
-        players = ffa.df_to_players(df)
+        players = ffa.df_to_players(df, self.source)
         self.assertTrue(len(players) > 0)
         o = ffa.optimizer_factory('dk', players)
         self.assertIsInstance(o, LineupOptimizer)
         self.assertIsNotNone(o.players)
+
+    def test_lineups_to_df(self):
+        df = self.clean_df
+        df = ffa.add_salaries(df, self.db, self.source,
+                          self.season_year, self.week, False)
+        players = ffa.df_to_players(df, self.source)
+        o = ffa.optimizer_factory('dk', players)
+        lineups = o.optimize(5)
+        ldf = ffa.lineups_to_df(lineups)
+        self.assertIsInstance(ldf, tuple)
+        self.assertIsInstance(ldf[0], pd.DataFrame)
 
 
 if __name__ == '__main__':

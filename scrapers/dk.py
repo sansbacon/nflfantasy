@@ -4,6 +4,7 @@ from __future__ import absolute_import, print_function, division
 
 import logging
 import mmap
+import re
 
 import pandas as pd
 

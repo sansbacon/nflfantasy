@@ -2,12 +2,12 @@
 # dkweek.py
 
 import logging
-import pprint
 
 import arrow
-from nfl.scrapers.browser import BrowserScraper
+from nflmisc.browser import BrowserScraper
 from nfl.seasons import current_season_year, season_week
 from nfl.utility import getdb
+
 
 def dkgames(scraper, draft_group, main_slate=True, slate_name='Sun 1:00PM'):
     # games
@@ -28,6 +28,7 @@ def dkgames(scraper, draft_group, main_slate=True, slate_name='Sun 1:00PM'):
                       'source_away_team_code': away, 'main_slate': main_slate,
                       'slate_name': slate_name, 'slate_size': len(games)})
     return games
+
 
 def dkcontests(scraper, slate_name='Sun 1:00PM', game_type='Classic'):
     '''
