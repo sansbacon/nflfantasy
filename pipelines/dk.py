@@ -11,6 +11,7 @@ import logging
 
 logging.getLogger(__name__).addHandler(logging.NullHandler())
 
+
 def game_id(p, games):
     '''
     
@@ -26,6 +27,7 @@ def game_id(p, games):
     elif p['tid'] == p['atid']:
         game = [g for g in games if g['source_away_team_code'] == p['atabbr']][0]
     return game['source_game_id']
+
 
 def player_team(p):
     '''
@@ -43,6 +45,7 @@ def player_team(p):
         return (p['atabbr'], p['htabbr'])
     else:
         raise ValueError('cannot find team code')
+
 
 def weekly_dk_games_table(games, seas, week, main_slate, slate_name):
     '''
@@ -96,6 +99,7 @@ def weekly_dk_players_table(players, games, seas, week):
         fixed.append(f)
     return fixed
 
+
 def dk_slate_players_table(players, seas, week, slate):
     '''
     
@@ -118,6 +122,7 @@ def dk_slate_players_table(players, seas, week, slate):
         f['salary'] = p['Salary']
         fixed.append(f)
     return fixed
+
 
 def valornone(val):
     '''

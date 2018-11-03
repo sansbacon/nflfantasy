@@ -1,0 +1,9 @@
+*.sql
+*.pyc
+*.gz
+*.zip
+*.sqlc
+*.json
+*.feather
+*.csv
+tests/data/*

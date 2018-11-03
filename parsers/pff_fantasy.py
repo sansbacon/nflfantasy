@@ -61,5 +61,19 @@ class PFFFantasyParser(object):
         return results
 
 
+    def weekly_projections(self, content):
+        '''
+        Parses profootballfocus weekly projections
+
+        Args:
+            content(dict): parsed JSON
+
+        Returns:
+            list
+
+        '''
+        return content['player_projections']
+
+
 if __name__ == '__main__':
     pass

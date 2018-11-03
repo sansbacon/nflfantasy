@@ -1,13 +1,21 @@
+# pipelines/pff.py
+# UNDER CONSTRUCTION
+
+
+import feather
+import pandas as pd
+
+
 def _fpts(p):
     '''
     Calculates standard fantasy points
-    
+
     Args:
         p(dict): fantasy player
-        
+
     Returns:
         float
-        
+
     '''
     fpts = 0
     fpts += p.get('pass_yds', 0.0) * .04
@@ -24,12 +32,12 @@ def _fpts(p):
 def yearly_projections_table(vals, season_year, lua):
     '''
     Prepares dict for insertion in yearly_projections
-       
+
     Args:
         vals(list): of dict
         season_year(int): 2018, etc.
         lua(str): timestamp string
-        
+
     '''
     fix = []
 
@@ -64,5 +72,33 @@ def yearly_projections_table(vals, season_year, lua):
         f['fantasy_points_hppr'] = f.get('fantasy_points_std',0) + (f.get('rec',0) * 0.5)
         f['fantasy_points_ppr'] = f.get('fantasy_points_std',0) + f.get('rec',0)
         fix.append(f)
-    
+
     return fix
+
+
+def get_pff_mfl_d(db):
+    '''
+    Dict of pff to mfl ids
+
+    Args:
+        db(NFLPostgres): instance
+
+    Returns:
+        dict
+
+    '''
+    q = """select pff_player_id as pid, mfl_player_id as mid
+       from dfs.pff_mfl_xref"""
+    return {p['pid']: p['mid'] for p in db.select_dict(q)}
+
+
+def pff_to_df(proj):
+    '''
+    TODO: implement this
+    Make sure filename matches pattern in the ffa-pydfs.R script
+
+    '''
+    df = pd.DataFrame(proj)
+    for pos in ('QB', 'RB', 'WR', 'TE', 'DST'):
+        fn = pos + '.feather'
+        feather.write_dataframe(df.query('pos == "{}"'.format(pos), fn))

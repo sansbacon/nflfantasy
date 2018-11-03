@@ -5,7 +5,7 @@ import logging
 import webbrowser
 
 
-from nflfantasy.scrapers.scraper import FootballScraper
+from nflmisc.scraper import FootballScraper
 from nfl.utility import merge_two
 
 
@@ -296,7 +296,7 @@ class YahooFantasyScraper(FootballScraper):
         '''
         # for football, replace sort_date with sort_week
         return ['position', 'status', 'search', 'sort', 'sort_type', 'sort_season',
-                'sort_date', 'start', 'count']
+                'sort_week', 'start', 'count']
 
     @property
     def players_subresources(self):
