@@ -1,110 +1,197 @@
 # -*- coding: utf-8 -*-
-# nflfantasy/draft.py
-# scraper/parser for DRAFT.com
+# nflfantasy/fantasypros.py
+# scraper/parser for fantasypros.com
 
-import json
 import logging
-from operator import itemgetter
 import re
 
+from bs4 import BeautifulSoup
+
 from nflmisc.scraper import FootballScraper
-from nfl.utility import merge_two
+from nflmisc.wayback import WaybackScraper
 
 
 class Scraper(FootballScraper):
     '''
 
     '''
-    def _json_file(self, fn):
+
+    @property
+    def formats(self):
+        return ['std', 'ppr', 'hppr']
+
+    @property
+    def positions(self):
+        return set(self.std_positions + self.ppr_positions)
+
+    @property
+    def ppr_positions(self):
+        return ['rb', 'wr', 'te', 'flex', 'qb-flex']
+
+    @property
+    def std_positions(self):
+        return ['qb', 'k', 'dst']
+
+    def _construct_url(self, pos, fmt, cat):
         '''
-        Opens JSON file from disk
+        Creates url for rankings or projections pages
 
         Args:
-            fn:
+            pos:
+            fmt:
+            cat: rankings or projections
 
         Returns:
-            dict: JSON parsed into dict
-
+            url string
         '''
-        with open(fn, 'r') as infile:
-            return json.load(infile)
+        if fmt not in self.formats:
+            raise ValueError('invalid format: {}'.format(fmt))
 
-    def adp(self, start_date, end_date, season_year, participants, entry_cost, token):
+        if pos not in self.positions:
+            raise ValueError('invalid format: {}'.format(fmt))
+
+        url = 'https://www.fantasypros.com/nfl/{cat}/{pos}.php'
+        if pos in self.ppr_positions:
+            if fmt == 'std':
+                url = 'https://www.fantasypros.com/nfl/{cat}/{pos}.php'
+            elif fmt == 'ppr':
+                url = 'https://www.fantasypros.com/nfl/{cat}/ppr-{pos}.php'
+            elif fmt == 'hppr':
+                url = 'https://www.fantasypros.com/nfl/{cat}/half-point-ppr-{pos}.php'
+
+        return url.format(cat=cat, pos=pos)
+
+    def adp(self, fmt):
         '''
+        Gets ADP page
 
         Args:
-            start_date:
-            end_date:
-            season_year:
-            participants:
-            entry_cost:
-            token:
+            fmt: 'std', 'ppr'
 
         Returns:
-            dict
-
+            content: HTML string of page
         '''
-        url = 'https://api.playdraft.com/feeds/v2/sports/nfl//season/adp?'
-        params = {'start_date': start_date,
-                  'end_date': end_date,
-                  'year': season_year,
-                  'participants': participants,
-                  'entry_cost': entry_cost,
-                  'token': token}
-        return self.get_json(url, params)
-
-    def complete_contests(self, fn=None):
-        '''
-
-        Args:
-            fn (str):
-
-        Returns:
-            dict
-
-        '''
-        if fn:
-            return self._json_file(fn)
+        if fmt == 'std':
+            url = 'https://www.fantasypros.com/nfl/adp/overall.php'
+        elif fmt == 'ppr':
+            url = 'https://www.fantasypros.com/nfl/adp/ppr-overall.php'
         else:
-            url = 'https://api.playdraft.com/v1/window_clusters/2015/complete_contests'
-            return self.get_json(url=url)
+            raise ValueError('invalid format: {}'.format(fmt))
+        return self.get(url)
 
-    def draft(self, league_id=None, fn=None):
+    def draft_rankings(self, pos, fmt):
+        '''
+        Gets draft rankings page
+
+        Args:
+            pos: 'qb', 'rb', 'wr', 'te', 'flex', 'qb-flex', 'k', 'dst'
+            fmt: 'std', 'ppr', 'hppr'
+
+        Returns:
+            content: HTML string of page
+        '''
+        url = self._construct_url(pos, fmt, 'rankings')
+        return self.get(url)
+
+    def player_weekly_rankings(self, pid, fmt, week):
         '''
 
         Args:
-            league_id (str):
-            fn (str):
+            pid:
+            fmt:
+            week:
 
         Returns:
-            dict
 
         '''
-        if fn:
-            return self._json_file(fn)
-        elif league_id:
-            url = 'https://api.playdraft.com/v3/drafts/{}'
-            return self.get_json(url=url.format(league_id))
-        else:
-            return ValueError('must specify league_id or fn')
+        # https://www.fantasypros.com/nfl/rankings/tom-brady.php?type=weekly&week=2&scoring=PPR
+        url = 'https://www.fantasypros.com/nfl/rankings/{}.php?type=weekly&week={}&scoring={}'
+        return self.get(url.format(pid, week, fmt))
 
-    def player_pool(self, pool_id=None, fn=None):
+    def projections(self, pos, fmt, week):
+        '''
+        Gets rest-of-season rankings page
+
+        Args:
+            pos: 'qb', 'rb', 'wr', 'te', 'flex', 'qb-flex', 'k', 'dst'
+            fmt: 'std', 'ppr', 'hppr'
+            week: 'draft' or 1-17
+
+        Returns:
+            content: HTML string of page
+        '''
+        url = self._construct_url(pos, fmt, 'projections')
+        params = {'week': week}
+        return self.get(url, payload=params)
+
+    def ros_rankings(self, pos, fmt):
+        '''
+        Gets rest-of-season rankings page
+
+        Args:
+            pos: 'qb', 'rb', 'wr', 'te', 'flex', 'qb-flex', 'k', 'dst'
+            fmt: 'std', 'ppr', 'hppr'
+
+        Returns:
+            content: HTML string of page
+        '''
+        url = self._construct_url(pos, fmt, 'rankings')
+        url = url.replace('rankings/', 'rankings/ros-')
+        return self.get(url)
+
+    def weekly_rankings(self, pos, fmt, week=None):
+        '''
+        Gets weekly rankings page
+        TODO: add something for the week parameter
+
+        Args:
+            pos: 'qb', 'rb', 'wr', 'te', 'flex', 'qb-flex', 'k', 'dst'
+            fmt: 'std', 'ppr', 'hppr'
+            week: default None, int between 1-17
+
+        Returns:
+            content: HTML string of page
+        '''
+        url = self._construct_url(pos, fmt, 'rankings')
+        if week:
+            url = '{}?week={}'.format(url, week)
+        return self.get(url)
+
+    def weekly_scoring(self, pos, params, fmt=None):
         '''
 
         Args:
-            fn (dict):
+            pos (str): qb, rb, etc.
 
         Returns:
-            dict
 
         '''
-        if fn:
-            return self._json_file(fn)
-        elif pool_id:
-            url = 'https://api.playdraft.com/v4/player_pool/{}'
-            return self.get_json(url.format(pool_id))
+        if fmt:
+            url = 'https://www.fantasypros.com/nfl/reports/leaders/{}-{}.php?'
+            return self.get(url.format(fmt, pos.lower()), payload=params)
         else:
-            return ValueError('must specify pool_id or fn')
+            url = 'https://www.fantasypros.com/nfl/reports/leaders/{}.php?'
+            return self.get(url.format(pos.lower()), payload=params)
+
+
+class WScraper(WaybackScraper):
+    '''
+    '''
+
+    def weekly_rankings(self, pos, fmt, d):
+        '''
+        Gets weekly rankings page
+
+        Args:
+            pos: 'qb', 'rb', 'wr', 'te', 'flex', 'qb-flex', 'k', 'dst'
+            fmt: 'std', 'ppr', 'hppr'
+            d: datestring
+
+        Returns:
+            content: 2-element tuple with HTML string of page and datestring
+        '''
+        url = Scraper.construct_url(pos, fmt, 'rankings')
+        return self.get_wayback(url, d)
 
 
 class Parser():
@@ -113,353 +200,606 @@ class Parser():
 
     def __init__(self):
         '''
+
         '''
         logging.getLogger(__name__).addHandler(logging.NullHandler())
 
-    def _combine_bookings_players(self, bookings, players):
+    @property
+    def formats(self):
+        return ['std', 'ppr', 'hppr']
+
+    @property
+    def positions(self):
+        return set(self.std_positions + self.ppr_positions)
+
+    @property
+    def ppr_positions(self):
+        return ['rb', 'wr', 'te', 'flex', 'qb-flex']
+
+    @property
+    def std_positions(self):
+        return ['qb', 'k', 'dst']
+
+    def adp(self, content, season_year, scoring_format):
         '''
-        Combines players and bookings
+        Parses adp page
 
         Args:
-            bookings (list): of dict
-            players (list): of dict
-
-        Returns:
-            list: of dict
-
-        '''
-        merged = []
-
-        # go through bookings first
-        # create bookings dict with player_id: player_dict
-        b_wanted = ['id', 'player_id', 'booking_id', 'adp', 'position_id', 'projected_points']
-        bookingsd = {}
-        for b in bookings:
-            pid = b['player_id']
-            bd = {k: v for k, v in b.items() if k in b_wanted}
-            bd['booking_id'] = bd.pop('id')
-            bookingsd[pid] = bd
-
-        # now try to match up with players
-        p_wanted = ['first_name', 'last_name', 'team_id', 'injury_status']
-        for p in players:
-            match = bookingsd.get(p['id'])
-            if match:
-                merged.append(merge_two(match, {k: v for k, v in p.items()
-                                                if k in p_wanted}))
-        return merged
-
-    def _teams(self, teams):
-        '''
-        Creates list teams and teamsd (id: team)
-
-        Args:
-            teams (list):
-
-        Returns:
-            tuple
-
-        '''
-        twanted = ['abbr', 'city', 'id', 'nickname']
-        self.teams = [{k: v for k, v in t.items() if k in twanted} for t in teams]
-        self.teamsd = {t['id']: t['abbr'] for t in self.teams}
-        return (self.teams, self.teamsd)
-
-    def adp(self, content):
-        '''
-
-        Args:
-            content:
-
-        Returns:
-            list: of dict (name, team, adp, sportradar_id, min_pick, max_pick, position)
-
-        '''
-        return content['average_draft_positions']
-
-    def complete_contests(self, cc, season_year):
-        '''
-        Parses complete_contests resource. Does not get list of draft picks.
-
-        Args:
-            cc (dict): complete contests json file
+            content (str): HTML
             season_year (int): 2018, etc.
+            scoring_format (str): 'ppr', 'std', etc.
 
         Returns:
-            list: of contest dict
+            list of player dict
 
         '''
-        return [{'prize': float(dr['prize']), 'player_pool_id': dr['time_window_id'],
-                 'entry_cost': float(dr['entry_cost']),
-                 'draft_time': dr['draft_time'],
-                 'participants': dr['max_participants'],
-                 'league_id': dr['id'], 'season_year': season_year,
-                 'league_json': dr} for dr in cc['drafts']]
-
-    def draft_users(self, draft):
-        '''
-        Parses single draft resource into users and user_league
-
-        Args:
-            draft (dict):
-
-        Returns:
-            tuple: (list of dict, list of dict)
-
-        '''
-        if draft.get('draft'):
-            draft = draft['draft']
-        uwanted = ['experienced', 'id', 'skill_level', 'username']
-        users = [{k: v for k, v in user.items() if k in uwanted}
-                 for user in draft['users']]
-        league_users = [{'league_id': draft['id'],
-                         'user_id': dr['user_id'],
-                         'pick_order': dr['pick_order']}
-                        for dr in draft['draft_rosters']]
-        return users, league_users
-
-    def draft_picks(self, draft):
-        '''
-        Parses single draft resource into picks
-
-        Args:
-            draft (dict):
-
-        Returns:
-            list: of dict
-
-        '''
-        picks = []
-        if draft.get('draft'):
-            draft = draft['draft']
-        teams, teamsd = self._teams(draft['teams'])
-        posd = {int(pos['id']): pos['name'] for pos in draft['positions']}
-
-        # players
         players = []
-        for p in self._combine_bookings_players(draft['bookings'], draft['players']):
-            tid = p.get('team_id')
-            if tid:
-                p['team_abbr'] = teamsd.get(tid, 'FA')
+        soup = BeautifulSoup(content, 'lxml')
+        for tr in soup.find('table', {'id': 'data'}).find('tbody').find_all('tr'):
+            player = {'source': 'fantasypros',
+                      'source_league_format': scoring_format,
+                      'season_year': season_year}
+            tds = tr.find_all('td')
+
+            # exclude stray rows that don't have player data
+            if len(tds) == 1:
+                continue
+
+            # try to find player id, name, and code
+            try:
+                acode, aid = [a for a in tr.find_all('a')
+                              if 'tip' not in a.attrs['class']]
+                player['source_player_code'] = acode['href'].split('/')[-1].split('.php')[0]
+                player['source_player_name'] = acode.text
+                player['source_player_id'] = int(aid.attrs.get('class')[-1].split('-')[-1])
+            except:
+                logging.exception('could not find playerid for {}'.format(player['source_player_name']))
+
+            sm = tds[1].find_all('small')
+            if sm and len(sm) == 2:
+                player['source_team_code'] = sm[0].text
+            elif sm:
+                player['source_team_code'] = long_to_code(player['source_player_name'].split(' DST')[0].strip())
             else:
-                p['team_abbr'] = 'FA'
+                player['source_team_code'] = 'UNK'
 
-            p['position'] = posd.get(p['position_id'])
-            players.append(p)
+            # get remaining stats
+            posrk = tds[2].text
+            player['position_rank'] = int(''.join([s for s in posrk if s.isdigit()]))
+            player['source_player_position'] = ''.join([s for s in posrk if not s.isdigit()])
+            player['adp'] = float(tds[-1].text)
 
-        # bookings_xref
-        player_bookings_d = {p['booking_id']: p for p in players}
+            # add to list
+            players.append(player)
 
-        # picks
-        rosters = draft['draft_rosters']
-        pkwanted = ['booking_id', 'id', 'draft_roster_id', 'pick_number', 'slot_id']
-        for t in rosters:
-            for pick in [{k: v for k, v in pk.items() if k in pkwanted} for pk in t['picks']]:
-                pick['user_id'] = t['user_id']
-                pick['league_id'] = draft['id']
-
-                # add player data
-                match = player_bookings_d.get(pick['booking_id'])
-                if match:
-                    pickc = merge_two(pick, match)
-                else:
-                    logging.info('no bookings match for {}'.format(pickc))
-                picks.append(pickc)
-        return picks
-
-    def player_pool(self, pp, pool_date):
-        '''
-        Parses player_pool resource
-
-        Args:
-            pp (dict): player_pool resource - parsed JSON into dict
-            pool_date (str): e.g. '2018-04-10'
-
-        Returns:
-            list: of dict
-
-        '''
-        # no need for top-level 'player_pool' key
-        if pp.get('player_pool'):
-            pp = pp['player_pool']
-
-        # unique identifier for player pool
-        # changes over time (example - no Nick Chubb)
-        player_pool_id = pp['id']
-
-        teams, teamsd = self._teams(pp['teams'])
-        posd = {int(pos['id']): pos['name'] for pos in pp['positions']}
-
-        # loop through booking + player and add fields
-        players = []
-        ppwanted = ['adp', 'first_name', 'last_name', 'player_id', 'pool_date', 'booking_id',
-                    'season_year', 'player_pool_id', 'position', 'team', 'projected_points']
-        for pl in self._combine_bookings_players(pp['bookings'], pp['players']):
-            pl['player_pool_id'] = player_pool_id
-            pl['position'] = posd.get(pl['position_id'])
-            pl['team'] = teamsd.get(pl['team_id'], 'FA')
-            pl['pool_date'] = pool_date
-            pl['season_year'] = int(pool_date[0:4])
-            players.append({k: v for k, v in pl.items() if k in ppwanted})
         return players
 
-
-class CSVParser(object):
-    '''
-    Parses data dump from DRAFT about past season
-    '''
-
-    def team_total(self, team):
+    def depth_charts(self, content, team, as_of=None):
         '''
-        Calculate season score for bestball team
+        Team depth chart from fantasypros
 
         Args:
-            team (list): of player dict
+            content: HTML string
+            team: string 'ARI', etc.
+            as_of: datestr
 
         Returns:
-            float: team score for season
+            dc: list of dict
+        '''
+        dc = []
+        soup = BeautifulSoup(content, 'lxml')
+        for tr in soup.find_all('tr', {'class': re.compile(r'mpb')}):
+            p = {'source': 'fantasypros', 'team_code': team, 'as_of': as_of}
+            p['source_player_id'] = tr['class'][0].split('-')[-1]
+            tds = tr.find_all('td')
+            p['source_player_role'] = tds[0].text
+            p['source_player_name'] = tds[1].text
+            dc.append(p)
+        return dc
+
+    def draft_rankings_overall(self, content):
+        '''
+        Parses adp page
+
+        Args:
+            content: HTML string
+
+        Returns:
+            list of player dict
+        '''
+        soup = BeautifulSoup(content, 'lxml')
+        t = soup.find('table', {'id': 'data'})
+        headers = ['rank', 'player', 'pos', 'bye', 'best', 'worst', 'avg', 'stdev', 'adp', 'vs_adp']
+        return [self._tr(tr, headers) for tr in t.find_all('tr', {'class': re.compile(r'mpb-player')})]
+
+    def draft_rankings_position(self, content):
+        '''
+        Parses adp page
+
+        Args:
+            content: HTML string
+
+        Returns:
+            list of player dict
+        '''
+        soup = BeautifulSoup(content, 'lxml')
+        t = soup.find('table', {'id': 'data'})
+        headers = ['rank', 'player', 'bye', 'best', 'worst', 'avg', 'stdev', 'adp', 'vs_adp']
+        return [self._tr(tr, headers) for tr in t.find_all('tr', {'class': re.compile(r'mpb-player')})]
+
+    def projections(self, content, pos):
+        '''
+        Parses projections page
+
+        Args:
+            content: HTML string
+
+        Returns:
+            list of player dict
+        '''
+        pos = pos.upper()
+        soup = BeautifulSoup(content, 'lxml')
+        t = soup.find('table', {'id': 'data'})
+
+        if pos == 'QB':
+            headers = ['player', 'pass_att', 'pass_cmp', 'pass_yds', 'pass_td', 'pass_int',
+                       'rush_att', 'rush_yds', 'rush_td', 'fl', 'fpts']
+        elif pos == 'RB':
+            headers = ['player', 'rush_att', 'rush_yds', 'rush_td', 'rcvg_rec', 'rcvg_yds', 'rcvg_tds', 'fl', 'fpts']
+        elif pos == 'WR':
+            headers = ['player', 'rush_att', 'rush_yds', 'rush_td', 'rcvg_rec', 'rcvg_yds', 'rcvg_tds', 'fl', 'fpts']
+        elif pos == 'TE':
+            headers = ['player', 'rcvg_rec', 'rcvg_yds', 'rcvg_tds', 'fl', 'fpts']
+        elif pos == 'K':
+            headers = ['player', 'fg', 'fga', 'xpt', 'fpts']
+        elif pos == 'DST':
+            headers = ['player', 'sack', 'int', 'fr', 'ff', 'td', 'assist', 'safety', 'pa', 'yds_agnst', 'fpts']
+
+        return [self._tr(tr, headers) for tr in t.find_all('tr', {'class': re.compile(r'mpb-player')})]
+
+    def _player_id_team(self, td):
+        '''
+        Handles player/id/team cell in fpros rankings
+
+        Args:
+            td: is a td element
+
+        Returns:
+            name, team, id
+        '''
+        id = None
+        children = list(td.children)
+        name = children[0].text
+        team = children[2].text
+        a = td.find('a', {'href': '#'})
+        if a:
+            try:
+                id = a.attrs['data-fp-id']
+            except:
+                try:
+                    id = a.attrs['class'][-1].split('-')[-1]
+                except (KeyError, ValueError) as e:
+                    logging.exception(e)
+        return name, team, id
+
+    def _week_pos(self, soup):
+        '''
+        Handles subtitle and position in fpros rankings
+
+        Args:
+            soup: parsed BeautifulSoup
+
+        Returns:
+            week, pos
+        '''
+        # <title>Week 1 QB Rankings, QB Cheat Sheets, QB Week 1 Fantasy Football Rankings</title>
+        # but different locations on the half ppr and standard rankings pages
+        positions = ['QB', 'WR', 'TE', 'DST', 'RB']
+        title = soup.find('title')
+        subtitle = title.text.split(', ')[0]
+        week, pos = subtitle.split()[1:3]
+        if not week.isdigit:
+            for span in soup.find_all('span'):
+                if 'Week' in span.text:
+                    week = span.text.split()[-1]
+                else:
+                    week = None
+        if not pos in positions:
+            for li in soup.find_all('li', {'class': 'active'}):
+                a = li.find('a')
+                if a:
+                    pos = a.text
+                else:
+                    pos = None
+        return week, pos
+
+    def flex_weekly_rankings(self, content, fmt, season_year, week):
+        results = []
+        soup = BeautifulSoup(content, 'lxml')
+        for tr in soup.find_all('tr', {'class': re.compile(r'mpb-player')}):
+            player = {'source': 'fantasypros', 'season_year': season_year, 'week': week,
+                      'scoring_format': fmt, 'ranking_type': 'flex'}
+
+            tds = tr.find_all('td')
+
+            # tds[0]: rank
+            player['rank'] = tds[0].text
+
+            # tds[2]: player/id/team
+            player['source_player_name'], player['source_player_team'], player['source_player_id'] = \
+                self._player_id_team(tds[2])
+
+            # tds[3]: posrank
+            try:
+                player['source_player_posrk'] = int(''.join([i for i in tds[3].text if i.isdigit()]))
+                player['source_player_position'] = ''.join([i for i in tds[3].text if not i.isdigit()])
+            except:
+                pass
+
+            # tds[4]: opp
+            try:
+                player['source_player_opp'] = tds[4].text.split()[-1]
+            except:
+                pass
+
+            # tds[5:9] data
+            for k, v in zip(['best', 'worst', 'avg', 'stdev'], [td.text for td in tds[5:9]]):
+                player[k] = v
+
+            # get last updated
+            try:
+                player['source_last_updated'] = soup.select('h5 time')[0].attrs.get('datetime').split()[0]
+            except:
+                pass
+
+            results.append(player)
+        return results
+
+    def expert_rankings(self, content):
+        '''
+        FantasyPros responds with javascript function
+        This python function turns that response into a dict
+
+        Args:
+            content (str): text property of response
+
+        Returns:
+            list: list of dict
 
         '''
-        tot = 0
-        for week in range(1, 17):
-            ids = []
-            week_key = 'w{}'.format(week)
-            qbs = sorted([p for p in team if p['position'] == 'QB'],
-                         key=itemgetter(week_key), reverse=True)
-            rbs = sorted([p for p in team if p['position'] == 'RB'],
-                         key=itemgetter(week_key), reverse=True)
-            wrs = sorted([p for p in team if p['position'] == 'WR'],
-                         key=itemgetter(week_key), reverse=True)
-            tes = sorted([p for p in team if p['position'] == 'TE'],
-                         key=itemgetter(week_key), reverse=True)
+        results = []
+        patt = re.compile(r'FPWSIS.compareCallback\((.*?)\);')
+        match = re.search(patt, content)
+        if match:
+            rankings = json.loads(match.group(1)).get('rankings')
+            for fmt in ['PPR', 'HALF', 'STD']:
+                if rankings.get(fmt):
+                    ranks = rankings[fmt]
+                    for pid, pidranks in ranks.items():
+                        try:
+                            results.append({'player_id': pid,
+                                            'expert_rank': pidranks[0]['rank'],
+                                            'scoring_fmt': fmt.lower(),
+                                            'expert_id': pidranks[0]['expert_id'],
+                                            'consensus_rank': pidranks[1]['rank']})
+                        except:
+                            logging.exception('could not add {}'.format(pidranks))
+        else:
+            logging.error('could not parse response into JSON: {}'.format(content))
 
-            if len(qbs) > 0:
-                ids.append(qbs[0]['player_id'])
-            logging.debug('ids is now {}'.format(len(ids)))
-            if len(rbs) >= 2:
-                ids += [p['player_id'] for p in rbs[0:2]]
-            elif len(rbs) == 1:
-                ids.append(rbs[0]['player_id'])
-            logging.debug('ids is now {}'.format(len(ids)))
+        return results
 
-            if len(wrs) >= 3:
-                ids += [p['player_id'] for p in wrs[0:3]]
-            elif len(wrs) == 2:
-                ids += [p['player_id'] for p in wrs[0:2]]
-            elif len(wrs) == 1:
-                ids.append(wrs[0]['player_id'])
-            logging.debug('ids is now {}'.format(len(ids)))
+    def weekly_rankings(self, content, fmt, pos, season_year, week):
+        '''
+        Parses weekly rankings page for specific position
 
-            if len(tes) > 0:
-                ids.append(tes[0]['player_id'])
+        Args:
+            content: HTML string
 
-            logging.debug('ids is now {}'.format(len(ids)))
+        Returns:
+            list of player dict
+        '''
+        # table structure is different for flex rankings, so use separate function
+        if pos.lower() == 'flex':
+            return self.flex_weekly_rankings(content=content, fmt=fmt, season_year=season_year, week=week)
 
-            # now address the flex
-            for p in sorted(rbs + wrs + tes,
-                            key=itemgetter(week_key), reverse=True):
-                if p['player_id'] not in ids:
-                    ids.append(p['player_id'])
-                    break
+        results = []
+        soup = BeautifulSoup(content, 'lxml')
+        for tr in soup.find_all('tr', {'class': re.compile(r'mpb-player')}):
+            player = {'source': 'fantasypros', 'season_year': season_year, 'week': week,
+                      'scoring_format': fmt, 'ranking_type': 'pos', 'source_player_position': pos.upper()}
+            tds = tr.find_all('td')
 
-            logging.debug('ids is now {}'.format(len(ids)))
+            # tds[0]: rank
+            player['rank'] = tds[0].text
 
-            scores = [p[week_key] for p in team if p['player_id'] in ids]
-            week_tot = sum(scores)
-            logging.debug('{} is {}'.format(week_key, week_tot))
-            tot += week_tot
+            # tds[2]: player/id/team
+            player['source_player_name'], player['source_player_team'], player['source_player_id'] = \
+                self._player_id_team(tds[2])
 
-        return tot
+            # tds[3]: opp
+            try:
+                player['source_player_opp'] = tds[3].text.split()[-1]
+            except:
+                pass
+
+            # tds[4:8] data
+            for k, v in zip(['best', 'worst', 'avg', 'stdev'], [td.text for td in tds[4:8]]):
+                player[k] = v
+
+            # get last updated
+            try:
+                player['source_last_updated'] = soup.select('h5 time')[0].attrs.get('datetime').split()[0]
+            except:
+                pass
+
+            results.append(player)
+        return results
+
+    def player_weekly_rankings(self, content):
+        '''
+        Parses weekly rankings page for specific player
+
+        Args:
+            content (str): HTML
+
+        Returns:
+            list of dict
+
+        '''
+        results = []
+        soup = BeautifulSoup(content, 'lxml')
+        tbl = soup.select('table.expert-ranks')[0]
+
+        # get season
+        season = None
+        for th in [h.text for h in tbl.find_all('th')]:
+            if 'Accuracy' in th:
+                season = re.sub('[^0-9]', '', th)
+                break
+
+        # get week
+        week = re.sub('[^0-9]', '', soup.select('div.subhead.pull-left')[0].text)
+
+        # get player slug
+        a = soup.find('a', {'href': re.compile('/nfl/projections/\w+-+\w+.php')})
+        slug = a['href'].split('.php')[0].split('/')[-1]
+
+        # get player id and name
+        h1 = soup.find('h1')
+        source_player_name = h1.text
+        source_player_id = h1['class'][0].split('-')[-1]
+
+        # get player position and team
+        h5 = soup.find('h5')
+        source_player_position, source_player_team = [val.strip() for val in h5.text.split('-')]
+
+        # get format
+        fmt_d = {'Standard': 'std', 'PPR': 'ppr', 'Half PPR': 'hppr'}
+        for div in soup.find_all('div', class_='pull-right'):
+            if 'Half PPR' in div.text:
+                for option in div.find_all('option'):
+                    if option.get('selected') == "" and option.text in fmt_d:
+                        fmt = fmt_d.get(option.string)
+
+        # now loop through rankings
+        for tr in tbl.find('tbody').find_all('tr'):
+            # figure out everything we want here
+            rank = {'source': 'fantasypros', 'season_year': season, 'week': week,
+                    'scoring_format': fmt, 'ranking_type': 'weekly', 'source_player_id': source_player_id,
+                    'source_player_name': source_player_name, 'source_player_team': source_player_team,
+                    'source_player_position': source_player_position, 'source_player_code': slug}
+
+            tds = tr.find_all('td')
+            # tds[0]: expert name
+            rank['expert_name'] = tds[0].text
+            # tds[1]: affiliation
+            rank['expert_affiliation'] = tds[1].text
+            # tds[2]: rank
+            # strip non-numeric characters
+            rank['source_positional_rank'] = re.sub('[^0-9]', '', tds[2].text)
+            # tds[3]: rank_vs_ecr
+            rank['source_positional_rank_vs_ecr'] = tds[3].text
+            # all set
+            results.append(rank)
+        return results
+
+    def player_weekly_results(self, content, pos):
+        '''
+        Parses weekly rankings page for specific player
+
+        Args:
+            content (str): HTML
+            pos (str): qb, rb, etc.
+
+        Returns:
+            list of dict
+
+        '''
+        results = []
+        soup = BeautifulSoup(content, 'lxml')
+
+        # get season
+        try:
+            season = int(re.search(r'\d+', soup.find('h1').text).group())
+        except:
+            season = None
+
+        # get week
+        try:
+            week = int(re.search(r'\d+', soup.find('h5').text).group())
+        except:
+            week = None
+
+        tbl = soup.select('table#data')[0]
+        for tr in tbl.tbody.find_all('tr'):
+            if pos == 'dst':
+                # get player slug and name
+                a = tr.find('a', {'href': re.compile('/nfl/.*?/(.*?).php')})
+                slug = a['href'].split('.php')[0].split('/')[-1]
+                source_player_name = a.text
+                tds = tr.find_all('td')
+                fpts = float(tds[2].text)
+                results.append((season, week, slug, source_player_name, fpts))
+
+        return results
 
 
-class Agent(object):
+class Agent():
     '''
     '''
 
-    adp_headers = {
-                      'X-Client-Sha': 'fd31c977023d4fb3ff7b98e0d20e7861ad2ecea0',
-                      'Origin': 'https://draft.com',
-                      'Accept-Encoding': 'gzip, deflate, br',
-                      'X-User-Token': 'AXEcExsKNHPwxQZBbZCM',
-                      'Accept-Language': 'en-US,en;q=0.9,ar;q=0.8',
-                      'X-User-Auth-Id': 'afcd9e4f-5b7d-4e21-96ae-3801cc24f968',
-                      'Connection': 'keep-alive',
-                      'Pragma': 'no-cache',
-                      'X-Build-Number': '0',
-                      'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) '
-                                    'Chrome/65.0.3325.181 Safari/537.36',
-                      'Accept': 'application/json, text/javascript, */*; q=0.01',
-                      'Cache-Control': 'no-cache',
-                      'Referer': 'https://draft.com/rankings/11416',
-                      'X-Client-Type': 'web',
-                      'DNT': '1',
-                  },
-
-    cc_headers = {
-        'X-Client-Sha': 'fd31c977023d4fb3ff7b98e0d20e7861ad2ecea0',
-        'Origin': 'https://draft.com',
-        'X-Client-Type': 'web',
-        'X-Build-Number': '0',
-        'Accept-Encoding': 'gzip, deflate, br',
-        'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/65.0.3325.181 '
-                      'Safari/537.36',
-        'Accept-Language': 'en-US,en;q=0.9,ar;q=0.8',
-        'Accept': 'application/json, text/javascript, */*; q=0.01',
-        'X-User-Token': 'AXEcExsKNHPwxQZBbZCM',
-        'X-User-Auth-Id': 'afcd9e4f-5b7d-4e21-96ae-3801cc24f968',
-        'Referer': 'https://draft.com/upcoming',
-        'Connection': 'keep-alive',
-        'DNT': '1',
-    }
-
-    draft_headers = {
-        'X-Client-Sha': 'fd31c977023d4fb3ff7b98e0d20e7861ad2ecea0',
-        'Origin': 'https://draft.com',
-        'X-Client-Type': 'web',
-        'X-Build-Number': '0',
-        'Accept-Encoding': 'gzip, deflate, br',
-        'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/65.0.3325.181 '
-                      'Safari/537.36',
-        'Accept-Language': 'en-US,en;q=0.9,ar;q=0.8',
-        'Accept': 'application/json, text/javascript, */*; q=0.01',
-        'X-User-Token': 'AXEcExsKNHPwxQZBbZCM',
-        'X-User-Auth-Id': 'afcd9e4f-5b7d-4e21-96ae-3801cc24f968',
-        'Referer': 'https://draft.com/upcoming?draft_id=8d5f5c8d-5971-48bd-b4ff-0491278d689c&draft_type=draft',
-        'Connection': 'keep-alive',
-        'DNT': '1',
-    }
-
-    def __init__(self, cc_headers, draft_headers, cache_name='draft-nfl-agent'):
+    def __init__(self, cache_name='fpros-nfl-agent'):
+        logging.getLogger(__name__).addHandler(logging.NullHandler())
         self._s = Scraper(cache_name=cache_name)
         self._p = Parser()
-        self.cc_headers = cc_headers
-        self.draft_headers = draft_headers
 
-    def complete_contests(self, cc_headers):
+    def weekly_rankings_archived(self):
         '''
-        Gets complete_contests resource, saves to db
+        Gets old fantasypros rankings from the wayback machine
+        Uses wayback API to figure out if week rankings exist, then fetch+parse result
+
+        Returns:
+            players(list): of player rankings dict
+        '''
+        players = []
+        base_fpros = 'https://www.fantasypros.com/nfl/rankings/{}.php'
+        positions = ['QB', 'RB', 'WR', 'TE']
+
+        # loop through seasons
+        for season in [2014, 2015]:
+
+            # s is dict with keys = week, dict with keys start, end as value
+            s = get_season(season)
+
+            # loop through weeks
+            for week, v in s.items():
+                if s.get(week, None):
+                    weekdate = s.get(week)
+                    if weekdate:
+                        d = weekdate.get('start')
+                        logging.debug('d is a {}'.format(type(d)))
+                    else:
+                        raise Exception('could not find start of {} week {}'.format(season, week))
+
+                # loop through positions
+                for pos in positions:
+
+                    # generate url for wayback machine
+                    fpros_url = base_fpros.format(pos)
+                    content, cached = self._wb(fpros_url, d)
+
+                    if content:
+                        pw = self._p.weekly_rankings(content, season, week, pos)
+                        logging.info(pw)
+                        players.append(pw)
+                    else:
+                        logging.error('could not get {}|{}|{}'.format(season, week, pos))
+
+                    if not cached:
+                        time.sleep(2)
+
+        # players is list of list, flatten at the end
+        return list(itertools.chain.from_iterable(players))
+
+    def weekly_rankings(self, season, week, flex=False):
+        '''
+        Gets current fantasypros rankings
+
+        Returns:
+            players(list): of player rankings dict
+        '''
+        # this doesn't work
+
+        '''
+        players = []
+        base_fpros = 'https://www.fantasypros.com/nfl/rankings/{}.php'
+        positions = ['qb', 'rb', 'wr', 'te', 'flex']
+
+        # loop through seasons
+        # loop through positions
+        for pos in positions:
+            if not flex and pos == 'flex':
+                continue
+
+            content = self._s.get(base_fpros.format(pos))
+
+            if content:
+                pw = self._p.weekly_rankings(content, season, week, pos)
+                logging.info(pw)
+                players.append(pw)
+            else:
+                logging.error('could not get {}|{}|{}'.format(season, week, pos))
+
+        # players is list of list, flatten at the end
+        if not flex:
+            return list(itertools.chain.from_iterable(players))
+        else:
+            return list(itertools.chain.from_iterable(players)), flex_players
+        '''
+
+    def expert_weekly_rankings(self, season, week, pos, expert):
+        '''
+        Gets weekly rankings from expert
 
         Args:
-            cc_headers (dict):
+            season:
+            week:
+            pos:
+            expert:
 
         Returns:
             list: of dict
 
         '''
-        pass
+        # NOTE: should move this to a function
+        # also need to figure out if can obtain old ones by week
+        # step one: get the fantasypros list of players
+        # then filter out lower-ranked players with ECR threshold
+        posthresh = {'QB': 20, 'RB': 50, 'WR': 70, 'TE': 14, 'DST': 20, 'K': 14}
+        pcontent = self._s.get_json(url='https://www.fantasypros.com/ajax/player-search.php',
+                                    payload={'sport': 'NFL', 'position_id': 'OP'})
 
-    def draft(self, headers):
-        '''
-        Gets complete_contests resource, saves to db
+        # add positional ranks and then filter by positional threshold
+        playerdf = pd.DataFrame(pcontent)
+        playerdf.drop(['filename', 'value'], axis=1, inplace=True)
+        poscrit = playerdf['position'].isin(posthresh.keys())
+        playerdf = playerdf[poscrit]
+        playerdf.dropna(subset=['ecr'], inplace=True)
+        playerdf['posrk'] = playerdf.groupby("position")["ecr"].rank()
+        playerdf['thresh'] = playerdf['position'].apply(
+            lambda x: posthresh.get(x, None))
+        threshcrit = playerdf['posrk'] <= playerdf['thresh']
+        playerdf = playerdf[threshcrit]
+        playerdf.sort_values(by=['position', 'posrk'], inplace=True)
 
-        Args:
-            headers (dict):
+        # now do pairs of players
+        compare_url = 'https://partners.fantasypros.com/api/v1/compare-players.php?'
+        expert_ranks = []
 
-        Returns:
-            list: of dict
+        for pair in pair_list(playerdf.itertuples()):
+            if (pair[0][4] != pair[1][4]):
+                raise ValueError('pairs have different positions: {}'.format(pair))
+            player_pair = '{}:{}'.format(pair[0][2], pair[1][2])
+            pos = pair[0][4]
 
-        '''
-        pass
+            # players are colon-separated ids (13926:16421)
+            # expert 120 is Sean Koerner
+            params = {
+                'players': player_pair,
+                'experts': expert,
+                'position': pos,
+                'ranking_type': '1',
+                'details': 'all',
+                'sport': 'NFL',
+                'callback': 'FPWSIS.compareCallback'
+            }
+
+            content = self._s.get(url=compare_url, payload=params)
+            pair_rank = self._p.expert_rankings(content)
+            expert_ranks.append(pair_rank)
+
+        return expert_ranks
 
 
 if __name__ == '__main__':

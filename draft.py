@@ -1,123 +1,110 @@
 # -*- coding: utf-8 -*-
+# nflfantasy/draft.py
+# scraper/parser for DRAFT.com
 
-from csv import reader
-import datetime
 import json
 import logging
-import mmap
+from operator import itemgetter
 import re
 
-import pandas as pd
-
 from nflmisc.scraper import FootballScraper
+from nfl.utility import merge_two
 
 
 class Scraper(FootballScraper):
     '''
-    TODO: this class is not really implemented. Need to add in the contest page stuff as well.
+
     '''
-
-    def __init__(self):
-        self.contest_fn = None
-
-    def draft_groups(self, dgid, compid):
+    def _json_file(self, fn):
         '''
-        Gets dk draft group
+        Opens JSON file from disk
 
         Args:
-            dgid(int): dk draftgroup id
-            compid(int): dk competition id
+            fn:
 
         Returns:
-            dict: parsed JSON
+            dict: JSON parsed into dict
 
         '''
-        base_url = ('https://api.draftkings.com/draftgroups/v2/draftgroups/{}/'
-                    'competitions/{}/depthchart?format=json')
-        return self.get_json(base_url.format(dgid, compid))
+        with open(fn, 'r') as infile:
+            return json.load(infile)
 
-    def contest_data(self, fname):
+    def adp(self, start_date, end_date, season_year, participants, entry_cost, token):
         '''
-        Uses memory map instead of file_io to process DK contest results
 
         Args:
-            fname: string
+            start_date:
+            end_date:
+            season_year:
+            participants:
+            entry_cost:
+            token:
 
         Returns:
-            memory map of file
+            dict
+
         '''
-        try:
-            with open(fname, 'r+b') as f:
-                return mmap.mmap(f.fileno(), 0, prot=mmap.PROT_READ)
-        except Exception as e:
-            logging.exception(e)
+        url = 'https://api.playdraft.com/feeds/v2/sports/nfl//season/adp?'
+        params = {'start_date': start_date,
+                  'end_date': end_date,
+                  'year': season_year,
+                  'participants': participants,
+                  'entry_cost': entry_cost,
+                  'token': token}
+        return self.get_json(url, params)
 
-    def _entry(self, line, contest_id):
+    def complete_contests(self, fn=None):
+        '''
 
-        entry = {'contest_id': contest_id}
+        Args:
+            fn (str):
 
-        fields = [x.strip() for x in line.split(',')]
+        Returns:
+            dict
 
-        entry['contest_rank'] = fields[0]
-        entry['entry_id'] = fields[1]
-
-        # entries is in format: ScreenName (entryNumber/NumEntries)
-        if '(' in fields[2]:
-            name, entries = [x.strip() for x in fields[2].split(' ')]
-            entry['entry_name'] = name
-
-            match = re.search(r'\d+/(\d+)', entries)
-            if match:
-                entry['num_entries'] = match.group(1)
-
+        '''
+        if fn:
+            return self._json_file(fn)
         else:
-            entry['entry_name'] = fields[2]
-            entry['num_entries'] = 1
+            url = 'https://api.playdraft.com/v1/window_clusters/2015/complete_contests'
+            return self.get_json(url=url)
 
-        # fantasy points scored
-        entry['points'] = fields[4]
+    def draft(self, league_id=None, fn=None):
+        '''
 
-        # parse lineup_string into lineup dictionary, add to entry
-        lineup_string = fields[5]
-        lineup = self._lineup(lineup_string)
-        for position in lineup:
-            entry[position] = lineup[position]
+        Args:
+            league_id (str):
+            fn (str):
 
-        return entry
+        Returns:
+            dict
 
-    def _lineup(self, lineup_string):
+        '''
+        if fn:
+            return self._json_file(fn)
+        elif league_id:
+            url = 'https://api.playdraft.com/v3/drafts/{}'
+            return self.get_json(url=url.format(league_id))
+        else:
+            return ValueError('must specify league_id or fn')
 
-        lineup = {}
-        pattern = re.compile(
-            r'QB\s+(?P<qb>.*?)\s+RB\s+(?P<rb1>.*?)\s+RB\s+(?P<rb2>.*?)\s+WR\s+(?P<wr1>.*?)\s+WR\s+('
-            r'?P<wr2>.*?)\s+WR\s+(?P<wr3>.*?)\s+TE\s+(?P<te>.*?)\s+FLEX (?P<flex>.*?) DST(?P<dst>.*?)')
+    def player_pool(self, pool_id=None, fn=None):
+        '''
 
-        if ',' in line:
-            fields = [x.strip() for x in line.split(',')]
-            lineup_string = fields[-1]
+        Args:
+            fn (dict):
 
-            match = re.search(pattern, lineup_string)
-            if match:
-                lineup = match.groupdict()
+        Returns:
+            dict
 
-                # can't seem to get last part of regex to work
-                if 'dst' in lineup and lineup['dst'] == '':
-                    parts = lineup_string.split(' ')
-                    lineup['dst'] = parts[-1]
-                    parts = lineup_string.split(' ')
-                    lineup['dst'] = parts[-1]
-
-            else:
-                root.debug('missing lineup_string')
-
-        return lineup
-
-    def salary_data(self, fname):
-
-        try:
-            df = pd.read_csv(fname, header=True)
-        except:
-            logging.exception('salary_data(fname): fname must exist')
+        '''
+        if fn:
+            return self._json_file(fn)
+        elif pool_id:
+            url = 'https://api.playdraft.com/v4/player_pool/{}'
+            return self.get_json(url.format(pool_id))
+        else:
+            return ValueError('must specify pool_id or fn')
 
 
 class Parser():
@@ -129,250 +116,350 @@ class Parser():
         '''
         logging.getLogger(__name__).addHandler(logging.NullHandler())
 
-    def _team_id_to_code(self, id):
-        d = {324: 'BUF', 325: 'HOU', 326: 'CHI', 327: 'CIN', 329: 'CLE', 331: 'DAL',
-             332: 'DEN', 334: 'DET', 335: 'GB', 336: 'TEN', 338: 'IND', 339: 'KC',
-             341: 'OAK', 343: 'LAR', 345: 'MIA', 347: 'MIN', 348: 'NE', 350: 'NO',
-             351: 'NYG', 354: 'PHI', 355: 'ARI', 356: 'PIT', 357: 'LAC', 359: 'SF',
-             361: 'SEA', 362: 'TB', 363: 'WAS', 364: 'CAR', 365: 'JAX', 366: 'BAL'}
-        return d.get(id)
-
-    def depth_chart(self, content):
+    def _combine_bookings_players(self, bookings, players):
         '''
-        Parses DK depth chart
+        Combines players and bookings
 
         Args:
-            content: parsed JSON
+            bookings (list): of dict
+            players (list): of dict
 
         Returns:
             list: of dict
 
         '''
-        players = []
+        merged = []
 
-        # tdc is list with 2 elements (one for each team)
-        # each team is dict with 2 keys: teamId and depthCharts
-        # each depth chart is a list with elements for each position ("QB", etc.)
-        # each position is dict with keys: positionAbbreviation, positionName, teamDepthChartPlayers
-        # teamDepthChartPlayers is a list of dict
-        # each dict has keys: rank, playerId, firstName, lastName, shortName, playerAttributes, draftableGroupings
-        # playerAttributes is list (seems empty)
-        # draftableGroupings is list of dict (seems like for different slates)
-        # each draftableGrouping has keys: salary, rosterPositionName, draftableRosterPositions
-        # draftableRosterPositions is list of dict, each has keys: draftableId, rosterPositionId
-        for t in content['teamDepthCharts']:
-            tc = self._team_id_to_code(t['teamId'])
-            for posdepth in t['depthCharts']:
-                pos = posdepth.get('positionAbbreviation')
-                for pl in posdepth.get('teamDepthChartPlayers'):
-                    sal = pl.get('draftableGroupings')[0].get('salary')
-                    players.append([pl['rank'], pl['firstName'], pl['lastName'], tc, pos, sal])
+        # go through bookings first
+        # create bookings dict with player_id: player_dict
+        b_wanted = ['id', 'player_id', 'booking_id', 'adp', 'position_id', 'projected_points']
+        bookingsd = {}
+        for b in bookings:
+            pid = b['player_id']
+            bd = {k: v for k, v in b.items() if k in b_wanted}
+            bd['booking_id'] = bd.pop('id')
+            bookingsd[pid] = bd
+
+        # now try to match up with players
+        p_wanted = ['first_name', 'last_name', 'team_id', 'injury_status']
+        for p in players:
+            match = bookingsd.get(p['id'])
+            if match:
+                merged.append(merge_two(match, {k: v for k, v in p.items()
+                                                if k in p_wanted}))
+        return merged
+
+    def _teams(self, teams):
+        '''
+        Creates list teams and teamsd (id: team)
+
+        Args:
+            teams (list):
+
+        Returns:
+            tuple
+
+        '''
+        twanted = ['abbr', 'city', 'id', 'nickname']
+        self.teams = [{k: v for k, v in t.items() if k in twanted} for t in teams]
+        self.teamsd = {t['id']: t['abbr'] for t in self.teams}
+        return (self.teams, self.teamsd)
+
+    def adp(self, content):
+        '''
+
+        Args:
+            content:
+
+        Returns:
+            list: of dict (name, team, adp, sportradar_id, min_pick, max_pick, position)
+
+        '''
+        return content['average_draft_positions']
+
+    def complete_contests(self, cc, season_year):
+        '''
+        Parses complete_contests resource. Does not get list of draft picks.
+
+        Args:
+            cc (dict): complete contests json file
+            season_year (int): 2018, etc.
+
+        Returns:
+            list: of contest dict
+
+        '''
+        return [{'prize': float(dr['prize']), 'player_pool_id': dr['time_window_id'],
+                 'entry_cost': float(dr['entry_cost']),
+                 'draft_time': dr['draft_time'],
+                 'participants': dr['max_participants'],
+                 'league_id': dr['id'], 'season_year': season_year,
+                 'league_json': dr} for dr in cc['drafts']]
+
+    def draft_users(self, draft):
+        '''
+        Parses single draft resource into users and user_league
+
+        Args:
+            draft (dict):
+
+        Returns:
+            tuple: (list of dict, list of dict)
+
+        '''
+        if draft.get('draft'):
+            draft = draft['draft']
+        uwanted = ['experienced', 'id', 'skill_level', 'username']
+        users = [{k: v for k, v in user.items() if k in uwanted}
+                 for user in draft['users']]
+        league_users = [{'league_id': draft['id'],
+                         'user_id': dr['user_id'],
+                         'pick_order': dr['pick_order']}
+                        for dr in draft['draft_rosters']]
+        return users, league_users
+
+    def draft_picks(self, draft):
+        '''
+        Parses single draft resource into picks
+
+        Args:
+            draft (dict):
+
+        Returns:
+            list: of dict
+
+        '''
+        picks = []
+        if draft.get('draft'):
+            draft = draft['draft']
+        teams, teamsd = self._teams(draft['teams'])
+        posd = {int(pos['id']): pos['name'] for pos in draft['positions']}
+
+        # players
+        players = []
+        for p in self._combine_bookings_players(draft['bookings'], draft['players']):
+            tid = p.get('team_id')
+            if tid:
+                p['team_abbr'] = teamsd.get(tid, 'FA')
+            else:
+                p['team_abbr'] = 'FA'
+
+            p['position'] = posd.get(p['position_id'])
+            players.append(p)
+
+        # bookings_xref
+        player_bookings_d = {p['booking_id']: p for p in players}
+
+        # picks
+        rosters = draft['draft_rosters']
+        pkwanted = ['booking_id', 'id', 'draft_roster_id', 'pick_number', 'slot_id']
+        for t in rosters:
+            for pick in [{k: v for k, v in pk.items() if k in pkwanted} for pk in t['picks']]:
+                pick['user_id'] = t['user_id']
+                pick['league_id'] = draft['id']
+
+                # add player data
+                match = player_bookings_d.get(pick['booking_id'])
+                if match:
+                    pickc = merge_two(pick, match)
+                else:
+                    logging.info('no bookings match for {}'.format(pickc))
+                picks.append(pickc)
+        return picks
+
+    def player_pool(self, pp, pool_date):
+        '''
+        Parses player_pool resource
+
+        Args:
+            pp (dict): player_pool resource - parsed JSON into dict
+            pool_date (str): e.g. '2018-04-10'
+
+        Returns:
+            list: of dict
+
+        '''
+        # no need for top-level 'player_pool' key
+        if pp.get('player_pool'):
+            pp = pp['player_pool']
+
+        # unique identifier for player pool
+        # changes over time (example - no Nick Chubb)
+        player_pool_id = pp['id']
+
+        teams, teamsd = self._teams(pp['teams'])
+        posd = {int(pos['id']): pos['name'] for pos in pp['positions']}
+
+        # loop through booking + player and add fields
+        players = []
+        ppwanted = ['adp', 'first_name', 'last_name', 'player_id', 'pool_date', 'booking_id',
+                    'season_year', 'player_pool_id', 'position', 'team', 'projected_points']
+        for pl in self._combine_bookings_players(pp['bookings'], pp['players']):
+            pl['player_pool_id'] = player_pool_id
+            pl['position'] = posd.get(pl['position_id'])
+            pl['team'] = teamsd.get(pl['team_id'], 'FA')
+            pl['pool_date'] = pool_date
+            pl['season_year'] = int(pool_date[0:4])
+            players.append({k: v for k, v in pl.items() if k in ppwanted})
         return players
 
-    def _dk_game(self, g):
+
+class CSVParser(object):
+    '''
+    Parses data dump from DRAFT about past season
+    '''
+
+    def team_total(self, team):
         '''
-        Parses dk game description
-        TODO: figure out what this does
+        Calculate season score for bestball team
 
         Args:
-            g(str):
+            team (list): of player dict
 
         Returns:
-            dict
-
-        Examples:
-            5523905 NO @ JAX
-            5523912 CHI @ CIN
-            5523920 CLE @ NYG
-            5523921 DAL @ SF
-            5523929 TB @ MIA
-            5523933 HOU @ KC
-            5523937 WAS @ NE
-            5523950 TEN @ GB
-            5523953 CAR @ BUF
-            5523957 LAR @ BAL
-            5523960 IND @ SEA
-            5523961 PIT @ PHI
-        '''
-
-        td = {}
-        d = json.loads(g)
-        for g in d['draftGroup']['games']:
-            atid = g['awayTeamId']
-            htid = g['homeTeamId']
-            a, h = g['description'].split(' @ ')
-            td[atid] = a
-            td[htid] = h
-        return td
-
-    def draft_groups(self, content):
-        '''
-        Draft groups from contests page
-
-        Args:
-            content (str): stringified javascript variable
-
-        Returns:
-            dict
+            float: team score for season
 
         '''
-        games = []
-        dg = json.loads(content)
-        for g in dg['draftGroup']['games']:
-            games.append([g['gameId'], g['description']])
-        return games
+        tot = 0
+        for week in range(1, 17):
+            ids = []
+            week_key = 'w{}'.format(week)
+            qbs = sorted([p for p in team if p['position'] == 'QB'],
+                         key=itemgetter(week_key), reverse=True)
+            rbs = sorted([p for p in team if p['position'] == 'RB'],
+                         key=itemgetter(week_key), reverse=True)
+            wrs = sorted([p for p in team if p['position'] == 'WR'],
+                         key=itemgetter(week_key), reverse=True)
+            tes = sorted([p for p in team if p['position'] == 'TE'],
+                         key=itemgetter(week_key), reverse=True)
 
-    def lobby(self, content, season, week):
-        '''
-        Parses dk lobby (json embedded in HTML page) and returns list of contest dicts
+            if len(qbs) > 0:
+                ids.append(qbs[0]['player_id'])
+            logging.debug('ids is now {}'.format(len(ids)))
+            if len(rbs) >= 2:
+                ids += [p['player_id'] for p in rbs[0:2]]
+            elif len(rbs) == 1:
+                ids.append(rbs[0]['player_id'])
+            logging.debug('ids is now {}'.format(len(ids)))
 
-        Args:
-            content(str): HTML from lobby
-            season (int):
-            week (int): for football only
+            if len(wrs) >= 3:
+                ids += [p['player_id'] for p in wrs[0:3]]
+            elif len(wrs) == 2:
+                ids += [p['player_id'] for p in wrs[0:2]]
+            elif len(wrs) == 1:
+                ids.append(wrs[0]['player_id'])
+            logging.debug('ids is now {}'.format(len(ids)))
 
-        Returns:
-            contests(list): of contest dicts
-        '''
-        contests = []
-        pattern = re.compile(r'packagedContests = (\[.*?\])\;', re.MULTILINE | re.DOTALL)
-        match = re.search(pattern, content)
+            if len(tes) > 0:
+                ids.append(tes[0]['player_id'])
 
-        if match:
-            for contest in json.loads(match.group(1)):
-                # 1 - NFL, 2- MLB, NBA??
-                if contest.get('s') == 1:
-                    # convert epoch string to date
-                    ds = re.findall('\d+', contest.get('sd', ''))[0]
-                    cd = datetime.datetime.strftime(datetime.datetime.fromtimestamp(float(ds) / 1000), '%m-%d-%Y')
+            logging.debug('ids is now {}'.format(len(ids)))
 
-                    # create context dict
-                    headers = ['season', 'week', 'contest_name', 'contest_date', 'contest_slate', 'contest_fee',
-                               'contest_id', 'max_entries', 'contest_size', 'prize_pool']
-                    vals = [season, week, contest.get('n'), cd, contest.get('sdstring'), contest.get('a'),
-                            contest.get('id'), contest.get('mec'), contest.get('m'), contest.get('po')]
-                    contests.append(dict(zip(headers, vals)))
-
-        return contests
-
-    def slate_entries(self, fn):
-        '''
-        Parses contest download file from dk.com to get all entries
-
-        Args:
-            fn (str): filename
-
-        Returns:
-            list: List of dict
-
-        '''
-        results = []
-        with open(fn, 'r') as infile:
-            # strange format in the file
-            #
-            for idx, row in enumerate(reader(infile)):
-                if not row[0]:
+            # now address the flex
+            for p in sorted(rbs + wrs + tes,
+                            key=itemgetter(week_key), reverse=True):
+                if p['player_id'] not in ids:
+                    ids.append(p['player_id'])
                     break
 
-                if idx == 0:
-                    headers = row[0:12]
-                else:
-                    results.append(dict(zip(headers, row[0:12])))
-        return results
+            logging.debug('ids is now {}'.format(len(ids)))
 
-    def slate_players(self, fn):
+            scores = [p[week_key] for p in team if p['player_id'] in ids]
+            week_tot = sum(scores)
+            logging.debug('{} is {}'.format(week_key, week_tot))
+            tot += week_tot
+
+        return tot
+
+
+class Agent(object):
+    '''
+    '''
+
+    adp_headers = {
+                      'X-Client-Sha': 'fd31c977023d4fb3ff7b98e0d20e7861ad2ecea0',
+                      'Origin': 'https://draft.com',
+                      'Accept-Encoding': 'gzip, deflate, br',
+                      'X-User-Token': 'AXEcExsKNHPwxQZBbZCM',
+                      'Accept-Language': 'en-US,en;q=0.9,ar;q=0.8',
+                      'X-User-Auth-Id': 'afcd9e4f-5b7d-4e21-96ae-3801cc24f968',
+                      'Connection': 'keep-alive',
+                      'Pragma': 'no-cache',
+                      'X-Build-Number': '0',
+                      'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) '
+                                    'Chrome/65.0.3325.181 Safari/537.36',
+                      'Accept': 'application/json, text/javascript, */*; q=0.01',
+                      'Cache-Control': 'no-cache',
+                      'Referer': 'https://draft.com/rankings/11416',
+                      'X-Client-Type': 'web',
+                      'DNT': '1',
+                  },
+
+    cc_headers = {
+        'X-Client-Sha': 'fd31c977023d4fb3ff7b98e0d20e7861ad2ecea0',
+        'Origin': 'https://draft.com',
+        'X-Client-Type': 'web',
+        'X-Build-Number': '0',
+        'Accept-Encoding': 'gzip, deflate, br',
+        'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/65.0.3325.181 '
+                      'Safari/537.36',
+        'Accept-Language': 'en-US,en;q=0.9,ar;q=0.8',
+        'Accept': 'application/json, text/javascript, */*; q=0.01',
+        'X-User-Token': 'AXEcExsKNHPwxQZBbZCM',
+        'X-User-Auth-Id': 'afcd9e4f-5b7d-4e21-96ae-3801cc24f968',
+        'Referer': 'https://draft.com/upcoming',
+        'Connection': 'keep-alive',
+        'DNT': '1',
+    }
+
+    draft_headers = {
+        'X-Client-Sha': 'fd31c977023d4fb3ff7b98e0d20e7861ad2ecea0',
+        'Origin': 'https://draft.com',
+        'X-Client-Type': 'web',
+        'X-Build-Number': '0',
+        'Accept-Encoding': 'gzip, deflate, br',
+        'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/65.0.3325.181 '
+                      'Safari/537.36',
+        'Accept-Language': 'en-US,en;q=0.9,ar;q=0.8',
+        'Accept': 'application/json, text/javascript, */*; q=0.01',
+        'X-User-Token': 'AXEcExsKNHPwxQZBbZCM',
+        'X-User-Auth-Id': 'afcd9e4f-5b7d-4e21-96ae-3801cc24f968',
+        'Referer': 'https://draft.com/upcoming?draft_id=8d5f5c8d-5971-48bd-b4ff-0491278d689c&draft_type=draft',
+        'Connection': 'keep-alive',
+        'DNT': '1',
+    }
+
+    def __init__(self, cc_headers, draft_headers, cache_name='draft-nfl-agent'):
+        self._s = Scraper(cache_name=cache_name)
+        self._p = Parser()
+        self.cc_headers = cc_headers
+        self.draft_headers = draft_headers
+
+    def complete_contests(self, cc_headers):
         '''
-        Parses slate contest file from dk.com to get all players on slate
+        Gets complete_contests resource, saves to db
 
         Args:
-            fn (str): filename
+            cc_headers (dict):
 
         Returns:
-            list: List of dict
+            list: of dict
 
         '''
-        results = []
-        with open(fn, 'r') as infile:
-            # strange format in the file
-            # data does not start until row 8 (index 7)
-            for idx, row in enumerate(reader(infile)):
-                if idx < 7:
-                    continue
-                elif idx == 7:
-                    headers = row[14:21]
-                else:
-                    results.append(dict(zip(headers, row)))
-        return results
+        pass
 
-    def weekly_contest_file(self, fn):
+    def draft(self, headers):
         '''
-        Parses contest upload file from dk.com
+        Gets complete_contests resource, saves to db
 
         Args:
-            fn:
+            headers (dict):
 
         Returns:
+            list: of dict
 
         '''
-        results = []
-        with open(fn, 'r') as infile:
-            # strange format in the file
-            # data does not start until row 8 (index 7)
-            for idx, row in enumerate(reader(infile)):
-                if idx < 7:
-                    continue
-                elif idx == 7:
-                    headers = row[14:21]
-                elif idx > 7:
-                    results.append(dict(zip(headers, row[14:21])))
-        return results
-
-    def weekly_salaries_file(self, fn):
-        '''
-        Parses salaries file from dk.com
-
-        Args:
-            fn:
-
-        Returns:
-
-        '''
-        results = []
-        with open(fn, 'r') as infile:
-            # strange format in the file
-            # data does not start until row 8 (index 7)
-            for idx, row in enumerate(reader(infile)):
-                if idx == 0:
-                    headers = row[11:18]
-                elif idx > 0:
-                    results.append(dict(zip(headers, row)))
-        return results
-
-    def weekly_players_games(self, content):
-        '''
-
-        Args:
-            content: parsed JSON dict
-
-        Returns:
-            players, games
-        '''
-        players = []
-        wanted = ['pid', 'pcode', 'fn', 'ln', 'pn', 'tid', 'htid', 'atid', 'htabbr', 'atabbr', 's',
-                  'ppg', 'or', 'pp', 'i']
-        players = [{k: v for k, v in p.items() if k in wanted} for p in content['playerList']]
-        games = []
-        for game_id, gamev in content['teamList'].items():
-            game = {'source_game_id': game_id}
-            d = gamev.get('tz').split('(')[-1].split(')')[0]
-            game['game_date'] = datetime.datetime.utcfromtimestamp(int(d) / 1000)
-            game['source_home_team_code'] = gamev['ht']
-            game['source_away_team_code'] = gamev['at']
-            games.append(game)
-
-        return players, games
-
-
+        pass
 
 
 if __name__ == '__main__':

@@ -1,127 +1,136 @@
 # -*- coding: utf-8 -*-
 
-from csv import reader
-import datetime
-import json
 import logging
-import mmap
 import re
 
-import pandas as pd
+from bs4 import BeautifulSoup
+import unidecode
 
-from nflmisc.scraper import FootballScraper
+from nfl.dates import today, yesterday_x, convert_format
+from nfl.seasons import current_season_year
+from nfl.teams import nickname_to_code
+from nfl.utility import merge_two
+from nflmisc.browser import BrowserScraper
 
 
-class Scraper(FootballScraper):
+class Scraper(BrowserScraper):
     '''
-    TODO: this class is not really implemented. Need to add in the contest page stuff as well.
+
     '''
 
-    def __init__(self):
-        self.contest_fn = None
+    def __init__(self, config, visible=False, profile=None):
+        logging.getLogger(__name__).addHandler(logging.NullHandler())
+        BrowserScraper.__init__(self, visible=visible, profile=profile)
+        self.user = config.get('espn', 'username')
+        self.password = config.get('espn', 'password')
 
-    def draft_groups(self, dgid, compid):
+    def drops(self, league_id, season_year=None, start_date=None, end_date=None):
         '''
-        Gets dk draft group
+        http://games.espn.com/ffl/recentactivity?
 
         Args:
-            dgid(int): dk draftgroup id
-            compid(int): dk competition id
+            league_id:
 
         Returns:
-            dict: parsed JSON
 
         '''
-        base_url = ('https://api.draftkings.com/draftgroups/v2/draftgroups/{}/'
-                    'competitions/{}/depthchart?format=json')
-        return self.get_json(base_url.format(dgid, compid))
+        if not start_date:
+            start_date = yesterday_x(interval=2, fmt='espn_fantasy')
+        if not end_date:
+            end_date = today(fmt='espn_fantasy')
+        if not season_year:
+            season_year = current_season_year()
 
-    def contest_data(self, fname):
+        url = 'http://games.espn.com/ffl/recentactivity'
+        params = {
+            'leagueId': league_id,
+            'activityType': '2',
+            'startDate': start_date,
+            'seasonId': season_year,
+            'endDate': end_date,
+            'teamId': '-1',
+            'tranType': '3'
+        }
+
+        url = '{}?{}'.format(url, urlencode(params))
+        driver = self.browser
+        driver.get(url)
+        self.urls.append(url)
+        return self.browser.page_source
+
+    def fantasy_league_rosters(self, league_id, encoding='latin1'):
         '''
-        Uses memory map instead of file_io to process DK contest results
-
-        Args:
-            fname: string
-
-        Returns:
-            memory map of file
+        Gets roster for team in ESPN fantasy league
         '''
-        try:
-            with open(fname, 'r+b') as f:
-                return mmap.mmap(f.fileno(), 0, prot=mmap.PROT_READ)
-        except Exception as e:
-            logging.exception(e)
+        url = 'http://games.espn.com/ffl/leaguerosters'
+        params = {'leagueId': league_id}
+        url = '{}?{}'.format(url, urlencode(params))
+        driver = self.browser
+        driver.get(url)
+        self.urls.append(url)
+        return self.browser.page_source
 
-    def _entry(self, line, contest_id):
+    def fantasy_league_scoreboard(self, league_id, season):
+        '''
+        Gets scoreboard from ESPN fantasy league
+        '''
+        params = {'leagueId': league_id, 'seasonId': season}
+        url = 'http://games.espn.com/ffl/scoreboard?{}'.format(urlencode(params))
+        driver = self.browser
+        driver.get(url)
+        self.urls.append(url)
+        return self.browser.page_source
 
-        entry = {'contest_id': contest_id}
+    def fantasy_team_roster(self, league_id, team_id, season):
+        '''
+        Gets roster for team in ESPN fantasy league
+        '''
+        params = {'leagueId': league_id,
+                      'teamId': team_id,
+                      'seasonId': season}
+        url = 'http://games.espn.com/ffl/clubhouse?{}'.format(urlencode(params))
+        driver = self.browser
+        driver.get(url)
+        self.urls.append(url)
+        return self.browser.page_source
 
-        fields = [x.strip() for x in line.split(',')]
+    def fantasy_projections(self, offset=0):
+        '''
+        Gets ESPN fantasy football projections
+        '''
+        url = 'http://games.espn.go.com/ffl/tools/projections?'
+        params = {'startIndex': offset}
+        return self.get(url, payload=params)
 
-        entry['contest_rank'] = fields[0]
-        entry['entry_id'] = fields[1]
-
-        # entries is in format: ScreenName (entryNumber/NumEntries)
-        if '(' in fields[2]:
-            name, entries = [x.strip() for x in fields[2].split(' ')]
-            entry['entry_name'] = name
-
-            match = re.search(r'\d+/(\d+)', entries)
-            if match:
-                entry['num_entries'] = match.group(1)
-
-        else:
-            entry['entry_name'] = fields[2]
-            entry['num_entries'] = 1
-
-        # fantasy points scored
-        entry['points'] = fields[4]
-
-        # parse lineup_string into lineup dictionary, add to entry
-        lineup_string = fields[5]
-        lineup = self._lineup(lineup_string)
-        for position in lineup:
-            entry[position] = lineup[position]
-
-        return entry
-
-    def _lineup(self, lineup_string):
-
-        lineup = {}
-        pattern = re.compile(
-            r'QB\s+(?P<qb>.*?)\s+RB\s+(?P<rb1>.*?)\s+RB\s+(?P<rb2>.*?)\s+WR\s+(?P<wr1>.*?)\s+WR\s+('
-            r'?P<wr2>.*?)\s+WR\s+(?P<wr3>.*?)\s+TE\s+(?P<te>.*?)\s+FLEX (?P<flex>.*?) DST(?P<dst>.*?)')
-
-        if ',' in line:
-            fields = [x.strip() for x in line.split(',')]
-            lineup_string = fields[-1]
-
-            match = re.search(pattern, lineup_string)
-            if match:
-                lineup = match.groupdict()
-
-                # can't seem to get last part of regex to work
-                if 'dst' in lineup and lineup['dst'] == '':
-                    parts = lineup_string.split(' ')
-                    lineup['dst'] = parts[-1]
-                    parts = lineup_string.split(' ')
-                    lineup['dst'] = parts[-1]
-
-            else:
-                root.debug('missing lineup_string')
-
-        return lineup
-
-    def salary_data(self, fname):
-
-        try:
-            df = pd.read_csv(fname, header=True)
-        except:
-            logging.exception('salary_data(fname): fname must exist')
+    def fantasy_waiver_wire(self, league_id, team_id, season, start_index=None, position=None):
+        '''
+        Gets waiver wire from ESPN fantasy league
+        league_id=488173, team_id=12, season=2017
+        '''
+        slot_categories = {
+            'qb': 0,
+            'rb': 2,
+            'wr': 4,
+            'te': 6,
+            'dst': 16,
+            'k': 17
+        }
+        params = {'leagueId': league_id, 'teamId': team_id, 'seasonId': season}
+        if start_index:
+            if start_index not in [0, 50, 100, 150, 200]:
+                raise ValueError('start index invalid: {}'.format(start_index))
+            params['startIndex'] = start_index
+        if position:
+            params['slotCategoryId'] = slot_categories[position.lower()]
+        url = 'http://games.espn.com/ffl/freeagency?' + urlencode(params)
+        self.browser.get(url)
+        self.urls.append(url)
+        return self.browser.page_source
 
 
 class Parser():
     '''
+
     '''
 
     def __init__(self):
@@ -129,248 +138,277 @@ class Parser():
         '''
         logging.getLogger(__name__).addHandler(logging.NullHandler())
 
-    def _team_id_to_code(self, id):
-        d = {324: 'BUF', 325: 'HOU', 326: 'CHI', 327: 'CIN', 329: 'CLE', 331: 'DAL',
-             332: 'DEN', 334: 'DET', 335: 'GB', 336: 'TEN', 338: 'IND', 339: 'KC',
-             341: 'OAK', 343: 'LAR', 345: 'MIA', 347: 'MIN', 348: 'NE', 350: 'NO',
-             351: 'NYG', 354: 'PHI', 355: 'ARI', 356: 'PIT', 357: 'LAC', 359: 'SF',
-             361: 'SEA', 362: 'TB', 363: 'WAS', 364: 'CAR', 365: 'JAX', 366: 'BAL'}
-        return d.get(id)
-
-    def depth_chart(self, content):
+    def _fantasy_team_roster(self, t, team_id, league_name):
         '''
-        Parses DK depth chart
-
+        Parses single table (one team) in fantasy_league_rosters
         Args:
-            content: parsed JSON
+            t: table element
 
         Returns:
-            list: of dict
-
+            list of dict
         '''
         players = []
+        for tr in t.find_all('tr', {'id': re.compile(r'plyr')}):
+            player = {'source_league_name': league_name}
 
-        # tdc is list with 2 elements (one for each team)
-        # each team is dict with 2 keys: teamId and depthCharts
-        # each depth chart is a list with elements for each position ("QB", etc.)
-        # each position is dict with keys: positionAbbreviation, positionName, teamDepthChartPlayers
-        # teamDepthChartPlayers is a list of dict
-        # each dict has keys: rank, playerId, firstName, lastName, shortName, playerAttributes, draftableGroupings
-        # playerAttributes is list (seems empty)
-        # draftableGroupings is list of dict (seems like for different slates)
-        # each draftableGrouping has keys: salary, rosterPositionName, draftableRosterPositions
-        # draftableRosterPositions is list of dict, each has keys: draftableId, rosterPositionId
-        for t in content['teamDepthCharts']:
-            tc = self._team_id_to_code(t['teamId'])
-            for posdepth in t['depthCharts']:
-                pos = posdepth.get('positionAbbreviation')
-                for pl in posdepth.get('teamDepthChartPlayers'):
-                    sal = pl.get('draftableGroupings')[0].get('salary')
-                    players.append([pl['rank'], pl['firstName'], pl['lastName'], tc, pos, sal])
+            # source_team_name
+            player['source_team_name'] = t.find('a', {'href': re.compile(r'ffl/clubhouse')}).text
+
+            # loop through cells in row
+            tds = tr.find_all('td')
+
+            # slot
+            player['roster_slot'] = tds[0].text
+
+            # td[1]: name, team, pos
+            ptp = tds[1].text
+            if 'D/ST' in ptp:
+                pattern = r'(.*?)\s+D/ST'
+                match = re.match(pattern, ptp)
+                if match:
+                    player['source_player_name'] = '{} Defense'.format(match.group(1))
+                    player['source_player_position'] = 'DST'
+                    player['source_player_team'] = nickname_to_code(match.group(1))
+
+            # [u'Kenny Stills', u'Mia WR  Q']
+            # [u'Dexter McCluster', u'Ten RB']
+            else:
+                parts = [i for i in re.split(r',\s+', ptp, flags=re.DOTALL | re.MULTILINE) if i]
+                if len(parts) == 2:
+                    player['source_player_name'] = parts[0].strip().replace('*', ' ')
+                    subparts = parts[1].split()
+                    if len(subparts) >= 2:
+                        player['source_player_team'], player['source_player_position'] = subparts[0:2]
+                else:
+                    raise ValueError('could not get player name')
+
+            # a[0]: player_id
+            a = tr.find('a', {'teamid': re.compile(r'\d+')})
+            if a:
+                player['source_player_id'] = a.attrs.get('playerid')
+                player['source_league_id'] = a.attrs.get('leagueid')
+                player['source_team_id'] = team_id
+                player['season_year'] = int(a.attrs.get('seasonid'))
+
+            # acquisition date & method
+            method = tds[-1].text
+            player['acquisition_method'] = method
+            span = tds[-1].find('span')
+            ad = span.attrs.get('title')
+            if ad:
+                player['acquisition_date'] = convert_format(ad, 'nfl')
+
+            players.append(player)
+
         return players
 
-    def _dk_game(self, g):
+    def drops(self, content):
         '''
-        Parses dk game description
-        TODO: figure out what this does
+        Parses recent drop/add page
 
         Args:
-            g(str):
+            content:
 
         Returns:
-            dict
-
-        Examples:
-            5523905 NO @ JAX
-            5523912 CHI @ CIN
-            5523920 CLE @ NYG
-            5523921 DAL @ SF
-            5523929 TB @ MIA
-            5523933 HOU @ KC
-            5523937 WAS @ NE
-            5523950 TEN @ GB
-            5523953 CAR @ BUF
-            5523957 LAR @ BAL
-            5523960 IND @ SEA
-            5523961 PIT @ PHI
-        '''
-
-        td = {}
-        d = json.loads(g)
-        for g in d['draftGroup']['games']:
-            atid = g['awayTeamId']
-            htid = g['homeTeamId']
-            a, h = g['description'].split(' @ ')
-            td[atid] = a
-            td[htid] = h
-        return td
-
-    def draft_groups(self, content):
-        '''
-        Draft groups from contests page
-
-        Args:
-            content (str): stringified javascript variable
-
-        Returns:
-            dict
-
-        '''
-        games = []
-        dg = json.loads(content)
-        for g in dg['draftGroup']['games']:
-            games.append([g['gameId'], g['description']])
-        return games
-
-    def lobby(self, content, season, week):
-        '''
-        Parses dk lobby (json embedded in HTML page) and returns list of contest dicts
-
-        Args:
-            content(str): HTML from lobby
-            season (int):
-            week (int): for football only
-
-        Returns:
-            contests(list): of contest dicts
-        '''
-        contests = []
-        pattern = re.compile(r'packagedContests = (\[.*?\])\;', re.MULTILINE | re.DOTALL)
-        match = re.search(pattern, content)
-
-        if match:
-            for contest in json.loads(match.group(1)):
-                # 1 - NFL, 2- MLB, NBA??
-                if contest.get('s') == 1:
-                    # convert epoch string to date
-                    ds = re.findall('\d+', contest.get('sd', ''))[0]
-                    cd = datetime.datetime.strftime(datetime.datetime.fromtimestamp(float(ds) / 1000), '%m-%d-%Y')
-
-                    # create context dict
-                    headers = ['season', 'week', 'contest_name', 'contest_date', 'contest_slate', 'contest_fee',
-                               'contest_id', 'max_entries', 'contest_size', 'prize_pool']
-                    vals = [season, week, contest.get('n'), cd, contest.get('sdstring'), contest.get('a'),
-                            contest.get('id'), contest.get('mec'), contest.get('m'), contest.get('po')]
-                    contests.append(dict(zip(headers, vals)))
-
-        return contests
-
-    def slate_entries(self, fn):
-        '''
-        Parses contest download file from dk.com to get all entries
-
-        Args:
-            fn (str): filename
-
-        Returns:
-            list: List of dict
-
-        '''
-        results = []
-        with open(fn, 'r') as infile:
-            # strange format in the file
-            #
-            for idx, row in enumerate(reader(infile)):
-                if not row[0]:
-                    break
-
-                if idx == 0:
-                    headers = row[0:12]
-                else:
-                    results.append(dict(zip(headers, row[0:12])))
-        return results
-
-    def slate_players(self, fn):
-        '''
-        Parses slate contest file from dk.com to get all players on slate
-
-        Args:
-            fn (str): filename
-
-        Returns:
-            list: List of dict
-
-        '''
-        results = []
-        with open(fn, 'r') as infile:
-            # strange format in the file
-            # data does not start until row 8 (index 7)
-            for idx, row in enumerate(reader(infile)):
-                if idx < 7:
-                    continue
-                elif idx == 7:
-                    headers = row[14:21]
-                else:
-                    results.append(dict(zip(headers, row)))
-        return results
-
-    def weekly_contest_file(self, fn):
-        '''
-        Parses contest upload file from dk.com
-
-        Args:
-            fn:
-
-        Returns:
-
-        '''
-        results = []
-        with open(fn, 'r') as infile:
-            # strange format in the file
-            # data does not start until row 8 (index 7)
-            for idx, row in enumerate(reader(infile)):
-                if idx < 7:
-                    continue
-                elif idx == 7:
-                    headers = row[14:21]
-                elif idx > 7:
-                    results.append(dict(zip(headers, row[14:21])))
-        return results
-
-    def weekly_salaries_file(self, fn):
-        '''
-        Parses salaries file from dk.com
-
-        Args:
-            fn:
-
-        Returns:
-
-        '''
-        results = []
-        with open(fn, 'r') as infile:
-            # strange format in the file
-            # data does not start until row 8 (index 7)
-            for idx, row in enumerate(reader(infile)):
-                if idx == 0:
-                    headers = row[11:18]
-                elif idx > 0:
-                    results.append(dict(zip(headers, row)))
-        return results
-
-    def weekly_players_games(self, content):
-        '''
-
-        Args:
-            content: parsed JSON dict
-
-        Returns:
-            players, games
+            list of dict
         '''
         players = []
-        wanted = ['pid', 'pcode', 'fn', 'ln', 'pn', 'tid', 'htid', 'atid', 'htabbr', 'atabbr', 's',
-                  'ppg', 'or', 'pp', 'i']
-        players = [{k: v for k, v in p.items() if k in wanted} for p in content['playerList']]
-        games = []
-        for game_id, gamev in content['teamList'].items():
-            game = {'source_game_id': game_id}
-            d = gamev.get('tz').split('(')[-1].split(')')[0]
-            game['game_date'] = datetime.datetime.utcfromtimestamp(int(d) / 1000)
-            game['source_home_team_code'] = gamev['ht']
-            game['source_away_team_code'] = gamev['at']
-            games.append(game)
+        soup = BeautifulSoup(content, 'lxml')
+        colors = ['#f2f2e8', '#f8f8f2']
+        for row in [tr for tr in soup.find_all('tr') if tr.attrs.get('bgcolor') in colors]:
+            player = {'source': 'espn'}
+            tds = row.find_all('td')
+            player['transaction_date'] = tds[0].text
+            player['transaction_type'] = tds[1].text.split()[-1]
+            player['transaction_description'] = tds[2].text
+            players.append(player)
+        return players
 
-        return players, games
+    def fantasy_league_rosters(self, content):
+        '''
+        Parses page of entire league rosters
+
+        Args:
+            content: HTML string
+
+        Returns:
+            list of dict
+        '''
+        players = []
+        soup = BeautifulSoup(content, 'lxml')
+
+        # league name
+        a = soup.find('a', {'href': re.compile(r'/ffl/leagueoffice\?leagueId')})
+        if a:
+            league_name = a.text
+        else:
+            league_name = 'Unknown'
+
+        for idx, t in enumerate(soup.find_all('table', {'id': re.compile(r'playertable_')})):
+            players += self._fantasy_team_roster(t, idx + 1, league_name)
+        return players
+
+    def fantasy_league_scoreboard(self, content):
+        '''
+        Gets league scoreboard from espn fantasy football
+
+        Args:
+            content:
+
+        Returns:
+            list of dict: in_play, minutes_remaining, proj, team, team_record
+        '''
+        soup = BeautifulSoup(content, 'lxml')
+        scores = []
+        for tbl in soup.find_all('td', class_='matchupContainer'):
+            score = {}
+            for idx, tr in enumerate(tbl.find_all('tr')):
+                # idx 0 is away team, 1 is home team, 2 is matchup information
+                if idx == 0:
+                    a = tr.find('a')
+                    score['away_team'] = a.attrs.get('title')
+                    for div in tr.find_all('div'):
+                        for span in div.find_all('span'):
+                            if span.attrs.get('title') == 'Record':
+                                score['away_team_record'] = span.text.replace(')', '').replace('(', '')
+                elif idx == 1:
+                    a = tr.find('a')
+                    score['home_team'] = a.attrs.get('title')
+                    for div in tr.find_all('div'):
+                        for span in div.find_all('span'):
+                            if span.attrs.get('title') == 'Record':
+                                score['home_team_record'] = span.text.replace(')', '').replace('(', '')
+                elif idx == 2:
+                    # first td is for the away team, second td is for home team
+                    # have td for labels and td for players_played
+                    # four tds in total away, away, home, home
+                    # NOTE: something is not matching up, can't figure out 12/11
+                    labels = [['away_yet_to_play', 'away_in_play', 'away_minutes_remaining', 'away_proj'],
+                              ['home_yet_to_play', 'home_in_play', 'home_minutes_remaining', 'home_proj']]
+                    players_played = [[item.text for item in pp.find_all('div')]
+                                      for pp in tr.find_all('td', class_='playersPlayed')]
+                    players_played = [[subitem.replace(u'\xa0', u' ') for subitem in item] for item in players_played]
+                    for label, pp in zip(labels, players_played):
+                        score = merge_two(score, dict(zip(label, pp)))
+
+            scores.append(score)
+        return scores
+
+    def fantasy_team_roster(self, content):
+        '''
+
+        Args:
+            content (str): HTML string from espn waiver wire page
+
+        Returns:
+            players (list): list of player dict
+        '''
+        players = []
+
+        # remove * from player names
+        soup = BeautifulSoup(content, 'lxml')
+        for tr in soup.find_all('tr', {'id': re.compile(r'plyr')}):
+            player = {'source': 'espn'}
+            tds = tr.findAll('td')
+            if not tds or len(tds) == 0:
+                continue
+            else:
+                # td[0]: slot
+                player['slot'] = tds[0].text
+
+                # td[1]:
+                ptp = tds[1].text
+                if 'D/ST' in ptp:
+                    pattern = r'(.*?)\s+D/ST'
+                    match = re.match(pattern, ptp)
+                    if match:
+                        player['source_player_name'] = '{} Defense'.format(match.group(1))
+                        player['source_player_position'] = 'DST'
+                        player['source_player_team'] = nickname_to_code(match.group(1))
+                        # a[0]: player_id
+                        a = tr.find('a')
+                        if a:
+                            player['source_player_id'] = a.attrs.get('playerid')
+                else:
+                    a, navstr = list(tds[1].children)[0:2]
+                    player['source_player_name'] = a.text
+                    player['source_player_team'], player['source_player_position'] = navstr.split()[-2:]
+                    player['source_player_id'] = a.attrs.get('playerid')
+
+                # remove asterisk injury or news designation
+                player['source_player_name'] = player.get('source_player_name', '').replace('*', ' ')
+                players.append(player)
+
+        return players
+
+    def fantasy_waiver_wire(self, content):
+        '''
+
+        Args:
+            content (str): HTML string from espn waiver wire page
+
+        Returns:
+            players (list): list of player dict
+        '''
+        players = []
+
+        # irregular use of non-breaking spaces; easier to remove at start
+        soup = BeautifulSoup(content, 'lxml')
+        # league name
+        a = soup.find('a', {'href': re.compile(r'/ffl/leagueoffice\?leagueId')})
+        if a:
+            league_name = a.text
+        else:
+            league_name = 'Unknown'
+
+        t = soup.find('table', {'id': 'playertable_0'})
+
+        # loop through rows in table
+        for tr in t.findAll('tr', {'class': 'pncPlayerRow'}):
+            player = {'source': 'espn', 'source_league_name': league_name}
+            tds = tr.findAll('td')
+            if not tds or len(tds) == 0:
+                continue
+            else:
+                # td[0]: name, team, pos
+                ptp = tds[0].text
+                if 'D/ST' in ptp:
+                    pattern = r'(.*?)\s+D/ST'
+                    match = re.match(pattern, ptp)
+                    if match:
+                        player['source_player_name'] = '{} Defense'.format(match.group(1))
+                        player['source_player_position'] = 'DST'
+                        player['source_player_team'] = nickname_to_code(match.group(1))
+
+                # [u'Kenny Stills', u'Mia WR  Q']
+                # [u'Dexter McCluster', u'Ten RB']
+                else:
+                    parts = [i for i in re.split(r',\s+', tds[0].text, flags=re.DOTALL | re.MULTILINE) if i]
+                    if len(parts) == 2:
+                        player['source_player_name'] = parts[0].strip().replace('*', ' ')
+                        subparts = parts[1].split()
+                        if len(subparts) >= 2:
+                            player['source_player_team'], player['source_player_position'] = subparts[0:2]
+                    else:
+                        logging.info(parts)
+
+                # a[0]: player_id
+                a = tr.find('a')
+                if a:
+                    player['source_player_id'] = a.attrs.get('playerid')
+
+                # tds[2]: player status
+                player['player_status'] = tds[2].text
+
+                # tds[-2]: owernership
+                player['player_own'] = tds[-2].text
+
+                # tds[-1]: plus/minus
+                player['player_own_pm'] = tds[-1].text.replace('+', '')
+
+                players.append(player)
+
+        return players
 
 
 class Agent():
@@ -378,166 +416,15 @@ class Agent():
     '''
 
     def __init__(self, cache_name=None):
+        '''
+
+        Args:
+            cache_name(str):
+
+        '''
         logging.getLogger(__name__).addHandler(logging.NullHandler())
-        self.s = requests.Session()
-        self.s.cookies = browsercookie.firefox()
-        self.s.headers.update({'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/55.0.2883.87 Safari/537.36'})
-
-        if cache_name:
-            requests_cache.install_cache(cache_name)
-        else:
-            requests_cache.install_cache(os.path.join(os.path.expanduser("~"), '.rcache', 'dk-nfl-cache'))
-
-
-    def _parse_contests(self, contests):
-        '''
-        Gets the useful data from contest dict
-
-        Args:
-            contests(list): of contest dict
-
-        Returns:
-            parsed(list): of contest dict
-        '''
-
-        wanted = ['ContestId', 'CreatorUserId', 'DraftGroupId', 'IsDirectChallenge', 'LineupId', 'MaxNumberPlayers', 'PlayerPoints', 'Sport',
-                  'TimeRemaining', 'TimeRemainingOpp', 'TotalPointsOpp', 'UserContestId', 'UsernameOpp']
-
-        return [{k:v for k,v in c.items() if k in wanted} for c in contests]
-
-    def live_contests(self):
-        '''
-        Gets list of contests
-
-        Returns:
-            contests(list): of contest dict
-        '''
-        r = self.s.get('https://www.draftkings.com/mycontests')
-        r.raise_for_status()
-        pattern = re.compile(r'live\:\s+(\[.*?\]),\s+upcoming', re.DOTALL | re.MULTILINE | re.IGNORECASE)
-        match = re.search(pattern, r.content)
-        if match:
-            js = match.group(1)
-            contests = json.loads(js)
-            return self._parse_contests(contests)
-        else:
-            return None
-
-    def live_hth(self):
-        '''
-        Gets list of live head-to-head contests (defined as MaxNumberPlayers = 2)
-
-        Returns:
-            hth(list): of contest dict
-        '''
-        return [c for c in self.live_contests() if c.get('MaxNumberPlayers') == 2]
-
-    def contest_lineups(self, contest_id, user_contest_id, draft_group_id):
-        '''
-        Gets list of all lineups for a single DK contest
-        Args:
-            contest_id:
-            user_contest_id:
-            draft_group_id:
-
-        Returns:
-            lineups(dict):
-
-        '''
-        url = 'https://www.draftkings.com/contest/gamecenter/{}?uc={}'.format(contest_id, user_contest_id)
-        r = self.s.get(url)
-        r.raise_for_status()
-
-        # contest page has var teams =
-        # [{"uc":623324083,"u":725157,"un":"sansbacon","t":"(1/1)","r":1,"pmr":102,"pts":148.88},
-        # {"uc":623263592,"u":1679292,"un":"Meth","t":"(1/1)","r":2,"pmr":102,"pts":132.96}]
-        # need to get 'uc' to create idList parameter below
-        match = re.search(r'var teams = (.*?);', r.content)
-
-        if match:
-            # contest data has the fields you need to get the lineups - not the actual lineups
-            contest_data = json.loads(match.group(1))
-            lineups = {int(t['uc']): {'un': t['un'], 'uc': int(t['uc']), 'pmr': t['pmr'], 'pts': t['pts']} for t in contest_data}
-
-            # have to send POST to get lineup data (page HTML is just a stub filled in with AJAX)
-            payload = {"idList":[uc for uc in lineups],"reqTs":int(time.time()),"contestId":contest_id,"draftGroupId":draft_group_id}
-            r = self.s.post('https://www.draftkings.com/contest/getusercontestplayers', data=payload)
-            r.raise_for_status()
-
-            # these are the relevant fields
-            # fn = first name, ln = last name, htabbr = home team abbreviation (e.g. Sea), htid = home team id (e.g. 361)
-            # pcode = player code (e.g. 28887), pid = player id (e.g. 568874) NOTE: not sure what difference is
-            # pn = position name, pts = fantasy points, s= salary
-            # will have --, 0, or -1 as value if player is not yet locked (on opposing team)
-            wanted = ['fn', 'ln', 'htabbr', 'htid', 'pcode', 'pid', 'pd', 'pn', 'pts', 's', 'tr', 'ytp']
-
-            # want to distinguish my team vs others
-            # the response is a nested dict, I want 'data' which uses the user_contest_id as its keys
-            # the lineup that is mine will match the user_contest_id parameter for this method
-            for ucid, team in json.loads(r.content)['data'].items():
-                logging.debug('user_contest_id is {} of type {}'.format(user_contest_id, type(user_contest_id)))
-                logging.debug('uc key is {} of type {}'.format(ucid, type(ucid)))
-                logging.debug('user_contest_id equal to uc? {}'.format(int(ucid) == user_contest_id))
-
-                ucid = int(ucid)
-                if ucid == user_contest_id:
-                    lineups[ucid]['my_lineup'] = True
-                else:
-                    lineups[ucid]['my_lineup'] = False
-
-                lineups[ucid]['players'] = [{k: v for k, v in player.items() if k in wanted} for player in team]
-
-            return lineups
-
-        else:
-            return None
-
-    def hth_matchup(self, lineups):
-        '''
-
-        Args:
-            lineups(dict):
-
-        Returns:
-            matchup(str):
-        '''
-        for lup in lineups.values():
-            sal = 50000 - sum([p.get('s') for p in lup['players'] if isinstance(p.get('s'), (int, long))])
-            pts = lup.get('pts')
-            pmr = lup.get('pmr')
-            l = [['{} {}'.format(p.get('fn'), p.get('ln')), p.get('pn'), p.get('s'), p.get('pts')] for p in lup['players']]
-            if lup.get('my_lineup'):
-                mine = l
-                mine.append(['Points Scored', pts])
-                mine.append(['Minutes Remaining', pmr])
-                mine.append(['Salary Remaining', sal])
-            else:
-                opp = l
-                opp.append(['Points Scored', pts])
-                opp.append(['Minutes Remaining', pmr])
-                opp.append(['Salary Remaining', sal])
-
-        return tabulate.tabulate(list(zip(mine, opp)), headers = ['My Team', 'Opp Team'])
-
-        #lines = ['MATCHUP REPORT']
-        #lines.append(", ".join(['{} {}-{}'.format(p.get('fn'), p.get('ln'), p.get('pn')) for p in my_team.get('players')]))
-        #lines.append(", ".join(['{} {}-{}'.format(p.get('fn'), p.get('ln'), p.get('pn')) for p in opp_team.get('players')]))
-        #return '\n\n'.join(lines)
-
-    def salaries(self):
-        url = 'https://www.draftkings.com/lobby#/NFL/0/All'
-        r = self.s.get(url)
-        match = re.search(r'var packagedContests = (.*?);', r.content)
-        if match:
-            contest = json.loads(match.group(1))[0]
-            dgid = contest.get('dg')
-            curl = 'https://www.draftkings.com/lineup/getavailableplayerscsv?contestTypeId=21&draftGroupId={}'
-            r = self.s.get(curl.format(dgid))
-            f = StringIO.StringIO(r.content)
-            dfr = pd.read_csv(f)
-            return dfr.T.to_dict().values()
-        else:
-            return None
+        self._s = Scraper(cache_name=cache_name)
+        self._p = Parser()
 
 
 if __name__ == '__main__':

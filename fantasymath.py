@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
-# nflfantasy/pff_fantasy.py
-# scraper/parser for profootballfocus.com fantasy resources
+# nflfantasy/fantasymath.py
+# scraper/parser for fantasymath.com fantasy resources
 
 import logging
 import re
@@ -14,30 +14,60 @@ class Scraper(FootballScraper):
     '''
 
     '''
-    def bestball(self):
-        '''
-        Gets profootballfocus teams
 
-        Returns:
-            dict
-
+    def __init__(self, headers=None, cookies=None, cache_name=None,
+                 delay=1, expire_hours=168, as_string=False):
         '''
-        return self.get_json('https://www.profootballfocus.com/api/prankster/rankings/nfl-best-ball')
-
-    def weekly_projections(self, week):
-        '''
-        Gets profootballfocus weekly projections
+        Scrape fantasymath API
 
         Args:
-            week(int): NFL week, 1-17
+            headers: dict of headers
+            cookies: cookiejar object
+            cache_name: should be full path
+            delay: int (be polite!!!)
+            expire_hours: int - default 168
+            as_string: get string rather than parsed json
+        '''
+        FootballScraper.__init__(self, headers, cookies, cache_name, delay, expire_hours, as_string)
+        self.headers.update({'origin': 'https://fantasymath.com',
+                             'authority': 'api.fantasymath.com',
+                             'referer': 'https://fantasymath.com/'})
+
+    def distribution(self, player_codes):
+        '''
+        Gets projection distribution for specified players
+
+        Args:
+            player_codes(list): of str
 
         Returns:
             dict
 
         '''
-        url = 'https://www.profootballfocus.com/api/prankster/projections?'
-        params = {'scoring': 54574, 'weeks': week}
-        return self.get_json(url, payload=params)
+        if isinstance(player_codes, str):
+            player_codes = [player_codes]
+
+        url = 'https://api.fantasymath.com/v2/players-wdis/'
+        params = {'wdis': player_codes,
+                  'dst': 'mfl',
+                  'qb': 'pass4',
+                  'scoring': 'ppr'}
+
+        return self.get_json(url, params)
+
+    def players(self):
+        '''
+        Gets projection distribution for specified players
+
+        Args:
+            player_codes(list): of str
+
+        Returns:
+            dict
+
+        '''
+        url = 'https://api.fantasymath.com/players'
+        return self.get_json(url)
 
 
 class Parser():
@@ -50,74 +80,56 @@ class Parser():
         '''
         logging.getLogger(__name__).addHandler(logging.NullHandler())
 
-    def _name(self, player):
-        try:
-            return '{} {}'.format(player['first_name'], player['last_name'])
-        except:
-            return None
-
-    def bestball_rankings(self, content):
+    def _fix_val(self, v):
         '''
-        Parses pff bestball json document
+        Fixes various values
 
         Args:
-            content(dict): parsed json
+            v:
 
         Returns:
-            list: of dict
 
         '''
-        results = []
-
-        # teams
-        teams = content['teams']
-        teams_d = {t['franchise_id']: t for t in teams}
-
-        # ranking_type
-        positions = content['ranking_type']['allowed_positions']
-        ranking_type = content['ranking_type']['path']
-        season = content['ranking_type']['season']
-
-        # rankers
-        rankers = content['rankers']
-        rankers_d = {r['id']: r for r in rankers}
-
-        # players
-        players = content['players']
-        players_d = {p['player_id']: p for p in players}
-
-        # position_rankings
-        for posrank in content['position_rankings']:
-            pos = posrank['position']
-            for prkg in posrank['player_rankings']:
-                pid = prkg['player_id']
-                for rnk in prkg['ranks']:
-                    results.append({'source_player_id': pid,
-                                    'source_player_name': self._name(players_d.get(pid)),
-                                    'source_player_rank': rnk['rank'],
-                                    'source_ranker_id': rnk['ranker_id'],
-                                    'source_ranker_name': rankers_d[rnk['ranker_id']]['name'],
-                                    'source_player_position': pos,
-                                    'season_year': season, 'source_ranking_type': ranking_type})
-
-        # players
-        # all_ranking_types
-
-        return results
+        if isinstance(v, float):
+            return round(v, 2)
+        else:
+            return v
 
 
-    def weekly_projections(self, content):
+    def distributions(self, content):
         '''
-        Parses profootballfocus weekly projections
+        Parses player distribution JSON
 
         Args:
-            content(dict): parsed JSON
+            content (dict): parsed JSON
 
         Returns:
-            list
+            list: of player dict
 
         '''
-        return content['player_projections']
+        wanted = ['fp_id', 'name', 'p25', 'p5', 'p50', 'p75', 'p95', 'pos', 'prob',
+                  'proj', 'scoring', 'std']
+        return [{k: self._fix_val(v) for k,v in p.items() if k in wanted} for
+                p in content['players']]
+
+
+    def players(self, content):
+        '''
+        Parses players JSON
+
+        Args:
+            content (dict): parsed JSON
+
+        Returns:
+            dict
+
+        '''
+        fm_players = {}
+        for p in content:
+            vals = p['label'].split()
+            d = {'id': p['value'], 'pos': vals[0], 'name': ' '.join(vals[1:])}
+            fm_players[d['id']] = d
+        return fm_players
 
 
 class Agent():
@@ -129,9 +141,9 @@ class Agent():
         self._s = Scraper(cache_name=cache_name)
         self._p = Parser()
 
-    def weekly_projections(self, week):
+    def weekly_projections(self):
         '''
-        Gets PFF weekly projections
+        Gets weekly projections
 
         Args:
             week(int):
@@ -140,8 +152,9 @@ class Agent():
             list: of dict
 
         '''
-        content = self._s.weekly_projections(week)
-        return self._p.weekly_projections(content)
+        pass
+        #content = self._s.weekly_projections()
+        #return self._p.weekly_projections(content)
 
 
 if __name__ == '__main__':
