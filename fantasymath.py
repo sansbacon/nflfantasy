@@ -1,9 +1,54 @@
 # -*- coding: utf-8 -*-
+# nflfantasy/pff_fantasy.py
+# scraper/parser for profootballfocus.com fantasy resources
 
-import json
+import logging
+import re
+
+from bs4 import BeautifulSoup
+
+from nflmisc.scraper import FootballScraper
 
 
-class PFFFantasyParser(object):
+class Scraper(FootballScraper):
+    '''
+
+    '''
+    def bestball(self):
+        '''
+        Gets profootballfocus teams
+
+        Returns:
+            dict
+
+        '''
+        return self.get_json('https://www.profootballfocus.com/api/prankster/rankings/nfl-best-ball')
+
+    def weekly_projections(self, week):
+        '''
+        Gets profootballfocus weekly projections
+
+        Args:
+            week(int): NFL week, 1-17
+
+        Returns:
+            dict
+
+        '''
+        url = 'https://www.profootballfocus.com/api/prankster/projections?'
+        params = {'scoring': 54574, 'weeks': week}
+        return self.get_json(url, payload=params)
+
+
+class Parser():
+    '''
+    '''
+
+    def __init__(self):
+        '''
+
+        '''
+        logging.getLogger(__name__).addHandler(logging.NullHandler())
 
     def _name(self, player):
         try:
@@ -73,6 +118,30 @@ class PFFFantasyParser(object):
 
         '''
         return content['player_projections']
+
+
+class Agent():
+    '''
+    '''
+
+    def __init__(self, cache_name='fpros-nfl-agent'):
+        logging.getLogger(__name__).addHandler(logging.NullHandler())
+        self._s = Scraper(cache_name=cache_name)
+        self._p = Parser()
+
+    def weekly_projections(self, week):
+        '''
+        Gets PFF weekly projections
+
+        Args:
+            week(int):
+
+        Returns:
+            list: of dict
+
+        '''
+        content = self._s.weekly_projections(week)
+        return self._p.weekly_projections(content)
 
 
 if __name__ == '__main__':

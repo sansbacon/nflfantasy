@@ -1,22 +1,62 @@
-# -*- coding: utf-8 -*-
-
 from collections import defaultdict
 import logging
-import math
 import re
-import xml.etree.ElementTree as ET
 
 from bs4 import BeautifulSoup
-from requests_html import HTML
+
+from nflmisc.scraper import FootballScraper
 
 
-class FFCParser():
+class Scraper(FootballScraper):
     '''
-    Parses html of NFL fantasy projections page of fantasycalculator.com into player dictionaries
 
-    Example:
-        p = FantasyFootballCalculatorParser()
-        players = p.projections(content)
+    '''
+    def adp(self, fmt='ppr', teams=12):
+        '''
+        Gets ADP page from fantasyfootballcalculator
+
+        Args:
+            fmt:
+            teams:
+
+        Returns:
+            HTML string or None
+        '''
+        url = 'https://fantasyfootballcalculator.com/adp_xml.php?'
+        params = {'format': fmt, 'teams': teams}
+        return self.get(url, payload=params)
+
+    def adp_old(self, season_year, fmt='ppr'):
+        '''
+        Gets ADP page from fantasyfootballcalculator
+
+        Args:
+            fmt:
+            teams:
+
+        Returns:
+            HTML string or None
+        '''
+        url = 'https://fantasyfootballcalculator.com/adp?'
+        params = {'year': season_year, 'format': fmt, 'teams': '12', 'view': 'graph', 'pos': 'all'}
+        return self.get(url, payload=params)
+
+    def projections(self):
+        '''
+        Fetch projections/rankings
+
+        Args:
+            url (str): url for the fantasy football calculator projections page
+
+        Returns:
+            HTML string if successful, None otherwise.
+        '''
+        url = 'https://fantasyfootballcalculator.com/rankings'
+        return self.get(url)
+
+
+class Parser():
+    '''
     '''
 
     def __init__(self):
@@ -38,7 +78,7 @@ class FFCParser():
             'avg': 'fantasy_points_per_game',
         }
 
-        #return fixed.get(header, header)
+        # return fixed.get(header, header)
         fixed_header = self._fix_header(header)
 
         # fixed_header none if not found, so use local list
@@ -59,14 +99,14 @@ class FFCParser():
     def _to_overall_pick(self, adp, adp_league_size, my_league_size):
         '''
         Data is in 2.01 format, so you have to translate those numbers to an overall pick
-        
+
         :param adp(str): is in round.pick format
         :param adp_league_size(int): number of teams in types of draft (8, 10, 12, 14)
         :return: Dictionary: is overall, round, pick based on your league size
         '''
         round, pick = adp.split('.')
         overall_pick = ((int(round) - 1) * adp_league_size) + int(pick)
-        adjusted_round = math.ceil(overall_pick/float(my_league_size))
+        adjusted_round = math.ceil(overall_pick / float(my_league_size))
         if adjusted_round == 1:
             adjusted_pick = overall_pick
         else:
@@ -78,7 +118,7 @@ class FFCParser():
         Gets ADP from past seasons
 
         Args:
-            content: 
+            content:
 
         Returns:
             list of dict
@@ -96,7 +136,7 @@ class FFCParser():
 
         return results
 
-    def adp (self, xml, size=12):
+    def adp(self, xml, size=12):
         '''
         Parses xml and returns list of player dictionaries
         Args:
@@ -123,7 +163,7 @@ class FFCParser():
                 players.append(player)
         return players
 
-    def projections (self,content):
+    def projections(self, content):
         '''
         Parses all rows of html table using BeautifulSoup and returns list of player dictionaries
         Args:
@@ -230,6 +270,16 @@ class FFCParser():
         return draft
 
 
+class Agent():
+    '''
+    '''
+
+    def __init__(self, cache_name='fpros-nfl-agent'):
+        logging.getLogger(__name__).addHandler(logging.NullHandler())
+        self._s = Scraper(cache_name=cache_name)
+        self._p = Parser()
+
+
+
 if __name__ == '__main__':
     pass
-

@@ -1,12 +1,116 @@
 # -*- coding: utf-8 -*-
+# nflfantasy/draft.py
+# scraper/parser for DRAFT.com
 
-from operator import itemgetter
+import json
 import logging
+from operator import itemgetter
+import re
 
+from nflmisc.scraper import FootballScraper
 from nfl.utility import merge_two
 
 
-class DraftNFLParser(object):
+class Scraper(FootballScraper):
+    '''
+
+    '''
+    def _json_file(self, fn):
+        '''
+        Opens JSON file from disk
+
+        Args:
+            fn:
+
+        Returns:
+            dict: JSON parsed into dict
+
+        '''
+        with open(fn, 'r') as infile:
+            return json.load(infile)
+
+    def adp(self, start_date, end_date, season_year, participants, entry_cost, token):
+        '''
+
+        Args:
+            start_date:
+            end_date:
+            season_year:
+            participants:
+            entry_cost:
+            token:
+
+        Returns:
+            dict
+
+        '''
+        url = 'https://api.playdraft.com/feeds/v2/sports/nfl//season/adp?'
+        params = {'start_date': start_date,
+                  'end_date': end_date,
+                  'year': season_year,
+                  'participants': participants,
+                  'entry_cost': entry_cost,
+                  'token': token}
+        return self.get_json(url, params)
+
+    def complete_contests(self, fn=None):
+        '''
+
+        Args:
+            fn (str):
+
+        Returns:
+            dict
+
+        '''
+        if fn:
+            return self._json_file(fn)
+        else:
+            url = 'https://api.playdraft.com/v1/window_clusters/2015/complete_contests'
+            return self.get_json(url=url)
+
+    def draft(self, league_id=None, fn=None):
+        '''
+
+        Args:
+            league_id (str):
+            fn (str):
+
+        Returns:
+            dict
+
+        '''
+        if fn:
+            return self._json_file(fn)
+        elif league_id:
+            url = 'https://api.playdraft.com/v3/drafts/{}'
+            return self.get_json(url=url.format(league_id))
+        else:
+            return ValueError('must specify league_id or fn')
+
+    def player_pool(self, pool_id=None, fn=None):
+        '''
+
+        Args:
+            fn (dict):
+
+        Returns:
+            dict
+
+        '''
+        if fn:
+            return self._json_file(fn)
+        elif pool_id:
+            url = 'https://api.playdraft.com/v4/player_pool/{}'
+            return self.get_json(url.format(pool_id))
+        else:
+            return ValueError('must specify pool_id or fn')
+
+
+class Parser():
+    '''
+    '''
+
     def __init__(self):
         '''
         '''
@@ -50,7 +154,7 @@ class DraftNFLParser(object):
         Creates list teams and teamsd (id: team)
 
         Args:
-            teams (list): 
+            teams (list):
 
         Returns:
             tuple
@@ -101,7 +205,7 @@ class DraftNFLParser(object):
 
         Returns:
             tuple: (list of dict, list of dict)
-            
+
         '''
         if draft.get('draft'):
             draft = draft['draft']
@@ -109,9 +213,9 @@ class DraftNFLParser(object):
         users = [{k: v for k, v in user.items() if k in uwanted}
                  for user in draft['users']]
         league_users = [{'league_id': draft['id'],
-                 'user_id': dr['user_id'],
-                 'pick_order': dr['pick_order']}
-                for dr in draft['draft_rosters']]
+                         'user_id': dr['user_id'],
+                         'pick_order': dr['pick_order']}
+                        for dr in draft['draft_rosters']]
         return users, league_users
 
     def draft_picks(self, draft):
@@ -123,7 +227,7 @@ class DraftNFLParser(object):
 
         Returns:
             list: of dict
-            
+
         '''
         picks = []
         if draft.get('draft'):
@@ -200,7 +304,7 @@ class DraftNFLParser(object):
         return players
 
 
-class DraftCSVParser(object):
+class CSVParser(object):
     '''
     Parses data dump from DRAFT about past season
     '''
@@ -266,6 +370,97 @@ class DraftCSVParser(object):
             tot += week_tot
 
         return tot
+
+
+class Agent(object):
+    '''
+    '''
+
+    adp_headers = {
+                      'X-Client-Sha': 'fd31c977023d4fb3ff7b98e0d20e7861ad2ecea0',
+                      'Origin': 'https://draft.com',
+                      'Accept-Encoding': 'gzip, deflate, br',
+                      'X-User-Token': 'AXEcExsKNHPwxQZBbZCM',
+                      'Accept-Language': 'en-US,en;q=0.9,ar;q=0.8',
+                      'X-User-Auth-Id': 'afcd9e4f-5b7d-4e21-96ae-3801cc24f968',
+                      'Connection': 'keep-alive',
+                      'Pragma': 'no-cache',
+                      'X-Build-Number': '0',
+                      'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) '
+                                    'Chrome/65.0.3325.181 Safari/537.36',
+                      'Accept': 'application/json, text/javascript, */*; q=0.01',
+                      'Cache-Control': 'no-cache',
+                      'Referer': 'https://draft.com/rankings/11416',
+                      'X-Client-Type': 'web',
+                      'DNT': '1',
+                  },
+
+    cc_headers = {
+        'X-Client-Sha': 'fd31c977023d4fb3ff7b98e0d20e7861ad2ecea0',
+        'Origin': 'https://draft.com',
+        'X-Client-Type': 'web',
+        'X-Build-Number': '0',
+        'Accept-Encoding': 'gzip, deflate, br',
+        'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/65.0.3325.181 '
+                      'Safari/537.36',
+        'Accept-Language': 'en-US,en;q=0.9,ar;q=0.8',
+        'Accept': 'application/json, text/javascript, */*; q=0.01',
+        'X-User-Token': 'AXEcExsKNHPwxQZBbZCM',
+        'X-User-Auth-Id': 'afcd9e4f-5b7d-4e21-96ae-3801cc24f968',
+        'Referer': 'https://draft.com/upcoming',
+        'Connection': 'keep-alive',
+        'DNT': '1',
+    }
+
+    draft_headers = {
+        'X-Client-Sha': 'fd31c977023d4fb3ff7b98e0d20e7861ad2ecea0',
+        'Origin': 'https://draft.com',
+        'X-Client-Type': 'web',
+        'X-Build-Number': '0',
+        'Accept-Encoding': 'gzip, deflate, br',
+        'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/65.0.3325.181 '
+                      'Safari/537.36',
+        'Accept-Language': 'en-US,en;q=0.9,ar;q=0.8',
+        'Accept': 'application/json, text/javascript, */*; q=0.01',
+        'X-User-Token': 'AXEcExsKNHPwxQZBbZCM',
+        'X-User-Auth-Id': 'afcd9e4f-5b7d-4e21-96ae-3801cc24f968',
+        'Referer': 'https://draft.com/upcoming?draft_id=8d5f5c8d-5971-48bd-b4ff-0491278d689c&draft_type=draft',
+        'Connection': 'keep-alive',
+        'DNT': '1',
+    }
+
+    def __init__(self, cc_headers, draft_headers, cache_name='draft-nfl-agent'):
+        self._s = Scraper(cache_name=cache_name)
+        self._p = Parser()
+        self.cc_headers = cc_headers
+        self.draft_headers = draft_headers
+
+    def complete_contests(self, cc_headers):
+        '''
+        Gets complete_contests resource, saves to db
+
+        Args:
+            cc_headers (dict):
+
+        Returns:
+            list: of dict
+
+        '''
+        pass
+
+    def draft(self, headers):
+        '''
+        Gets complete_contests resource, saves to db
+
+        Args:
+            headers (dict):
+
+        Returns:
+            list: of dict
+
+        '''
+        pass
+
 
 if __name__ == '__main__':
     pass

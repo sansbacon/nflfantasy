@@ -1,19 +1,201 @@
 # -*- coding: utf-8 -*-
-
-from __future__ import absolute_import, print_function, division
+# nflfantasy/fantasypros.py
+# scraper/parser for fantasypros.com
 
 import logging
-import json
 import re
 
 from bs4 import BeautifulSoup
 
-from nfl.teams import long_to_code
+from nflmisc.scraper import FootballScraper
+from nflmisc.wayback import WaybackScraper
 
 
-class FantasyProsNFLParser(object):
+class Scraper(FootballScraper):
     '''
-    used to parse Fantasy Pros projections and ADP pages
+
+    '''
+
+    @property
+    def formats(self):
+        return ['std', 'ppr', 'hppr']
+
+    @property
+    def positions(self):
+        return set(self.std_positions + self.ppr_positions)
+
+    @property
+    def ppr_positions(self):
+        return ['rb', 'wr', 'te', 'flex', 'qb-flex']
+
+    @property
+    def std_positions(self):
+        return ['qb', 'k', 'dst']
+
+    def _construct_url(self, pos, fmt, cat):
+        '''
+        Creates url for rankings or projections pages
+
+        Args:
+            pos:
+            fmt:
+            cat: rankings or projections
+
+        Returns:
+            url string
+        '''
+        if fmt not in self.formats:
+            raise ValueError('invalid format: {}'.format(fmt))
+
+        if pos not in self.positions:
+            raise ValueError('invalid format: {}'.format(fmt))
+
+        url = 'https://www.fantasypros.com/nfl/{cat}/{pos}.php'
+        if pos in self.ppr_positions:
+            if fmt == 'std':
+                url = 'https://www.fantasypros.com/nfl/{cat}/{pos}.php'
+            elif fmt == 'ppr':
+                url = 'https://www.fantasypros.com/nfl/{cat}/ppr-{pos}.php'
+            elif fmt == 'hppr':
+                url = 'https://www.fantasypros.com/nfl/{cat}/half-point-ppr-{pos}.php'
+
+        return url.format(cat=cat, pos=pos)
+
+    def adp(self, fmt):
+        '''
+        Gets ADP page
+
+        Args:
+            fmt: 'std', 'ppr'
+
+        Returns:
+            content: HTML string of page
+        '''
+        if fmt == 'std':
+            url = 'https://www.fantasypros.com/nfl/adp/overall.php'
+        elif fmt == 'ppr':
+            url = 'https://www.fantasypros.com/nfl/adp/ppr-overall.php'
+        else:
+            raise ValueError('invalid format: {}'.format(fmt))
+        return self.get(url)
+
+    def draft_rankings(self, pos, fmt):
+        '''
+        Gets draft rankings page
+
+        Args:
+            pos: 'qb', 'rb', 'wr', 'te', 'flex', 'qb-flex', 'k', 'dst'
+            fmt: 'std', 'ppr', 'hppr'
+
+        Returns:
+            content: HTML string of page
+        '''
+        url = self._construct_url(pos, fmt, 'rankings')
+        return self.get(url)
+
+    def player_weekly_rankings(self, pid, fmt, week):
+        '''
+
+        Args:
+            pid:
+            fmt:
+            week:
+
+        Returns:
+
+        '''
+        # https://www.fantasypros.com/nfl/rankings/tom-brady.php?type=weekly&week=2&scoring=PPR
+        url = 'https://www.fantasypros.com/nfl/rankings/{}.php?type=weekly&week={}&scoring={}'
+        return self.get(url.format(pid, week, fmt))
+
+    def projections(self, pos, fmt, week):
+        '''
+        Gets rest-of-season rankings page
+
+        Args:
+            pos: 'qb', 'rb', 'wr', 'te', 'flex', 'qb-flex', 'k', 'dst'
+            fmt: 'std', 'ppr', 'hppr'
+            week: 'draft' or 1-17
+
+        Returns:
+            content: HTML string of page
+        '''
+        url = self._construct_url(pos, fmt, 'projections')
+        params = {'week': week}
+        return self.get(url, payload=params)
+
+    def ros_rankings(self, pos, fmt):
+        '''
+        Gets rest-of-season rankings page
+
+        Args:
+            pos: 'qb', 'rb', 'wr', 'te', 'flex', 'qb-flex', 'k', 'dst'
+            fmt: 'std', 'ppr', 'hppr'
+
+        Returns:
+            content: HTML string of page
+        '''
+        url = self._construct_url(pos, fmt, 'rankings')
+        url = url.replace('rankings/', 'rankings/ros-')
+        return self.get(url)
+
+    def weekly_rankings(self, pos, fmt, week=None):
+        '''
+        Gets weekly rankings page
+        TODO: add something for the week parameter
+
+        Args:
+            pos: 'qb', 'rb', 'wr', 'te', 'flex', 'qb-flex', 'k', 'dst'
+            fmt: 'std', 'ppr', 'hppr'
+            week: default None, int between 1-17
+
+        Returns:
+            content: HTML string of page
+        '''
+        url = self._construct_url(pos, fmt, 'rankings')
+        if week:
+            url = '{}?week={}'.format(url, week)
+        return self.get(url)
+
+    def weekly_scoring(self, pos, params, fmt=None):
+        '''
+
+        Args:
+            pos (str): qb, rb, etc.
+
+        Returns:
+
+        '''
+        if fmt:
+            url = 'https://www.fantasypros.com/nfl/reports/leaders/{}-{}.php?'
+            return self.get(url.format(fmt, pos.lower()), payload=params)
+        else:
+            url = 'https://www.fantasypros.com/nfl/reports/leaders/{}.php?'
+            return self.get(url.format(pos.lower()), payload=params)
+
+
+class WScraper(WaybackScraper):
+    '''
+    '''
+
+    def weekly_rankings(self, pos, fmt, d):
+        '''
+        Gets weekly rankings page
+
+        Args:
+            pos: 'qb', 'rb', 'wr', 'te', 'flex', 'qb-flex', 'k', 'dst'
+            fmt: 'std', 'ppr', 'hppr'
+            d: datestring
+
+        Returns:
+            content: 2-element tuple with HTML string of page and datestring
+        '''
+        url = Scraper.construct_url(pos, fmt, 'rankings')
+        return self.get_wayback(url, d)
+
+
+class Parser():
+    '''
     '''
 
     def __init__(self):
@@ -41,7 +223,7 @@ class FantasyProsNFLParser(object):
     def adp(self, content, season_year, scoring_format):
         '''
         Parses adp page
-        
+
         Args:
             content (str): HTML
             season_year (int): 2018, etc.
@@ -49,7 +231,7 @@ class FantasyProsNFLParser(object):
 
         Returns:
             list of player dict
-            
+
         '''
         players = []
         soup = BeautifulSoup(content, 'lxml')
@@ -133,7 +315,7 @@ class FantasyProsNFLParser(object):
     def draft_rankings_position(self, content):
         '''
         Parses adp page
-        
+
         Args:
             content: HTML string
 
@@ -178,7 +360,7 @@ class FantasyProsNFLParser(object):
     def _player_id_team(self, td):
         '''
         Handles player/id/team cell in fpros rankings
-        
+
         Args:
             td: is a td element
 
@@ -261,7 +443,7 @@ class FantasyProsNFLParser(object):
                 pass
 
             # tds[5:9] data
-            for k,v in zip(['best', 'worst', 'avg', 'stdev'], [td.text for td in tds[5:9]]):
+            for k, v in zip(['best', 'worst', 'avg', 'stdev'], [td.text for td in tds[5:9]]):
                 player[k] = v
 
             # get last updated
@@ -275,8 +457,8 @@ class FantasyProsNFLParser(object):
 
     def expert_rankings(self, content):
         '''
-        FantasyPros responds with javascript function 
-        This python function turns that response into a dict    
+        FantasyPros responds with javascript function
+        This python function turns that response into a dict
 
         Args:
             content (str): text property of response
@@ -342,7 +524,7 @@ class FantasyProsNFLParser(object):
                 pass
 
             # tds[4:8] data
-            for k,v in zip(['best', 'worst', 'avg', 'stdev'], [td.text for td in tds[4:8]]):
+            for k, v in zip(['best', 'worst', 'avg', 'stdev'], [td.text for td in tds[4:8]]):
                 player[k] = v
 
             # get last updated
@@ -359,11 +541,11 @@ class FantasyProsNFLParser(object):
         Parses weekly rankings page for specific player
 
         Args:
-            content (str): HTML 
+            content (str): HTML
 
         Returns:
             list of dict
-            
+
         '''
         results = []
         soup = BeautifulSoup(content, 'lxml')
@@ -377,7 +559,7 @@ class FantasyProsNFLParser(object):
                 break
 
         # get week
-        week = re.sub('[^0-9]','', soup.select('div.subhead.pull-left')[0].text)
+        week = re.sub('[^0-9]', '', soup.select('div.subhead.pull-left')[0].text)
 
         # get player slug
         a = soup.find('a', {'href': re.compile('/nfl/projections/\w+-+\w+.php')})
@@ -415,7 +597,7 @@ class FantasyProsNFLParser(object):
             rank['expert_affiliation'] = tds[1].text
             # tds[2]: rank
             # strip non-numeric characters
-            rank['source_positional_rank'] = re.sub('[^0-9]','', tds[2].text)
+            rank['source_positional_rank'] = re.sub('[^0-9]', '', tds[2].text)
             # tds[3]: rank_vs_ecr
             rank['source_positional_rank_vs_ecr'] = tds[3].text
             # all set
@@ -427,9 +609,9 @@ class FantasyProsNFLParser(object):
         Parses weekly rankings page for specific player
 
         Args:
-            content (str): HTML 
+            content (str): HTML
             pos (str): qb, rb, etc.
-            
+
         Returns:
             list of dict
 
@@ -463,5 +645,162 @@ class FantasyProsNFLParser(object):
         return results
 
 
-if __name__ == "__main__":
+class Agent():
+    '''
+    '''
+
+    def __init__(self, cache_name='fpros-nfl-agent'):
+        logging.getLogger(__name__).addHandler(logging.NullHandler())
+        self._s = Scraper(cache_name=cache_name)
+        self._p = Parser()
+
+    def weekly_rankings_archived(self):
+        '''
+        Gets old fantasypros rankings from the wayback machine
+        Uses wayback API to figure out if week rankings exist, then fetch+parse result
+
+        Returns:
+            players(list): of player rankings dict
+        '''
+        players = []
+        base_fpros = 'https://www.fantasypros.com/nfl/rankings/{}.php'
+        positions = ['QB', 'RB', 'WR', 'TE']
+
+        # loop through seasons
+        for season in [2014, 2015]:
+
+            # s is dict with keys = week, dict with keys start, end as value
+            s = get_season(season)
+
+            # loop through weeks
+            for week, v in s.items():
+                if s.get(week, None):
+                    weekdate = s.get(week)
+                    if weekdate:
+                        d = weekdate.get('start')
+                        logging.debug('d is a {}'.format(type(d)))
+                    else:
+                        raise Exception('could not find start of {} week {}'.format(season, week))
+
+                # loop through positions
+                for pos in positions:
+
+                    # generate url for wayback machine
+                    fpros_url = base_fpros.format(pos)
+                    content, cached = self._wb(fpros_url, d)
+
+                    if content:
+                        pw = self._p.weekly_rankings(content, season, week, pos)
+                        logging.info(pw)
+                        players.append(pw)
+                    else:
+                        logging.error('could not get {}|{}|{}'.format(season, week, pos))
+
+                    if not cached:
+                        time.sleep(2)
+
+        # players is list of list, flatten at the end
+        return list(itertools.chain.from_iterable(players))
+
+    def weekly_rankings(self, season, week, flex=False):
+        '''
+        Gets current fantasypros rankings
+
+        Returns:
+            players(list): of player rankings dict
+        '''
+        # this doesn't work
+
+        '''
+        players = []
+        base_fpros = 'https://www.fantasypros.com/nfl/rankings/{}.php'
+        positions = ['qb', 'rb', 'wr', 'te', 'flex']
+
+        # loop through seasons
+        # loop through positions
+        for pos in positions:
+            if not flex and pos == 'flex':
+                continue
+
+            content = self._s.get(base_fpros.format(pos))
+
+            if content:
+                pw = self._p.weekly_rankings(content, season, week, pos)
+                logging.info(pw)
+                players.append(pw)
+            else:
+                logging.error('could not get {}|{}|{}'.format(season, week, pos))
+
+        # players is list of list, flatten at the end
+        if not flex:
+            return list(itertools.chain.from_iterable(players))
+        else:
+            return list(itertools.chain.from_iterable(players)), flex_players
+        '''
+
+    def expert_weekly_rankings(self, season, week, pos, expert):
+        '''
+        Gets weekly rankings from expert
+
+        Args:
+            season:
+            week:
+            pos:
+            expert:
+
+        Returns:
+            list: of dict
+
+        '''
+        # NOTE: should move this to a function
+        # also need to figure out if can obtain old ones by week
+        # step one: get the fantasypros list of players
+        # then filter out lower-ranked players with ECR threshold
+        posthresh = {'QB': 20, 'RB': 50, 'WR': 70, 'TE': 14, 'DST': 20, 'K': 14}
+        pcontent = self._s.get_json(url='https://www.fantasypros.com/ajax/player-search.php',
+                                    payload={'sport': 'NFL', 'position_id': 'OP'})
+
+        # add positional ranks and then filter by positional threshold
+        playerdf = pd.DataFrame(pcontent)
+        playerdf.drop(['filename', 'value'], axis=1, inplace=True)
+        poscrit = playerdf['position'].isin(posthresh.keys())
+        playerdf = playerdf[poscrit]
+        playerdf.dropna(subset=['ecr'], inplace=True)
+        playerdf['posrk'] = playerdf.groupby("position")["ecr"].rank()
+        playerdf['thresh'] = playerdf['position'].apply(
+            lambda x: posthresh.get(x, None))
+        threshcrit = playerdf['posrk'] <= playerdf['thresh']
+        playerdf = playerdf[threshcrit]
+        playerdf.sort_values(by=['position', 'posrk'], inplace=True)
+
+        # now do pairs of players
+        compare_url = 'https://partners.fantasypros.com/api/v1/compare-players.php?'
+        expert_ranks = []
+
+        for pair in pair_list(playerdf.itertuples()):
+            if (pair[0][4] != pair[1][4]):
+                raise ValueError('pairs have different positions: {}'.format(pair))
+            player_pair = '{}:{}'.format(pair[0][2], pair[1][2])
+            pos = pair[0][4]
+
+            # players are colon-separated ids (13926:16421)
+            # expert 120 is Sean Koerner
+            params = {
+                'players': player_pair,
+                'experts': expert,
+                'position': pos,
+                'ranking_type': '1',
+                'details': 'all',
+                'sport': 'NFL',
+                'callback': 'FPWSIS.compareCallback'
+            }
+
+            content = self._s.get(url=compare_url, payload=params)
+            pair_rank = self._p.expert_rankings(content)
+            expert_ranks.append(pair_rank)
+
+        return expert_ranks
+
+
+if __name__ == '__main__':
     pass
