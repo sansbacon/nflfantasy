@@ -1,6 +1,14 @@
 # nflfantasy/pipelines.py
 
 import logging
+from uuid import uuid4
+
+from bs4 import BeautifulSoup
+import pandas as pd
+import feather
+
+from pydfs_lineup_optimizer import get_optimizer, Player, Site, Sport
+from nfl.teams import long_to_code
 
 
 class DK:
@@ -94,8 +102,8 @@ class DK:
             f['source_player_id'] = p['pid']
             f['source_player_code'] = p['pcode']
             f['source_player_position'] = p['pn']
-            f['source_team_code'], f['source_opp_code'] = player_team(p)
-            f['source_game_id'] = game_id(p, games)
+            f['source_team_code'], f['source_opp_code'] = DK.player_team(p)
+            f['source_game_id'] = DK.game_id(p, games)
             f['opp_rating'] = p['or']
             f['salary'] = p['s']
             f['ppg'] = p['ppg']
@@ -137,7 +145,7 @@ class FourForFour:
         logging.getLogger(__name__).addHandler(logging.NullHandler())
 
     @staticmethod
-    def _add_sals(r, d, interactive=True):
+    def _add_sals(r, d, interactive=False):
         '''
         Adds salary based on player match
 
@@ -175,15 +183,16 @@ class FourForFour:
             df
 
         '''
-        rows['salary'] = dst_salary
-        rows['ffpts'] = ffpts
-        rows['pid'] = rows['pid'].apply(lambda x: str(uuid4())[0:8])
-        rows['first_name'] = 'Dummy'
-        rows['last_name'] = 'Defense'
-        rows['team'] = 'DMY'
-        rows['player'] = rows['first_name'] + ' ' + rows['last_name']
-        rows['pos'] = 'DST'
-        return rows
+        r2 = rows.copy()
+        r2['salary'] = dst_salary
+        r2['ffpts'] = ffpts
+        r2['pid'] = r2['pid'].apply(lambda x: str(uuid4())[0:8])
+        r2['first_name'] = 'Dummy'
+        r2['last_name'] = 'Defense'
+        r2['team'] = 'DMY'
+        r2['player'] = r2['first_name'] + ' ' + r2['last_name']
+        r2['pos'] = 'DST'
+        return r2
 
 
     @staticmethod
@@ -216,7 +225,7 @@ class FourForFour:
 
         '''
         # 4 for 4 has player column with no defense
-        df['player'] = df['player'].apply(lambda x: _namestrip(x))
+        df['player'] = df['player'].apply(lambda x: FourForFour._namestrip(x))
         df[['first_name', 'last_name']] = df['player'].str.split(' ', expand=True)
         return df
 
@@ -257,7 +266,7 @@ class FourForFour:
             DataFrame
 
         '''
-        dst = _dummy_dst(df[0:10].copy())
+        dst = FourForFour._dummy_dst(df[0:10].copy())
         return pd.concat([df, dst], ignore_index=True, sort=False)
 
     @staticmethod
@@ -286,10 +295,10 @@ class FourForFour:
                   salary
                FROM dfs.fn_{}sal_sws({}, {})"""
         sals = db.select_dict(q.format(source, season_year, week))
-        sals_d = {'{}_{}'.format(_namestrip(p['source_player_name']),
+        sals_d = {'{}_{}'.format(FourForFour._namestrip(p['source_player_name']),
                                  p['dfs_position']): p['salary']
                   for p in sals}
-        df['salary'] = df.apply(lambda x: _add_sals(x, sals_d, interactive), axis=1)
+        df['salary'] = df.apply(lambda x: FourForFour._add_sals(x, sals_d, interactive), axis=1)
         df['salary'] = df['salary'].astype(int)
         return df
 
@@ -310,8 +319,8 @@ class FourForFour:
         ## fix names
         ## numeric types / replace NaN
         df.columns = df.columns.str.lower()
-        df['team'] = df['team'].apply(lambda x: _f4f_to_dk_teams(x))
-        df = _name_fix(df)
+        df['team'] = df['team'].apply(lambda x: FourForFour._f4f_to_dk_teams(x))
+        df = FourForFour._name_fix(df)
         df['ffpts'].fillna(0, inplace=True)
         return df
 
@@ -327,7 +336,7 @@ class FourForFour:
             list: of Player
 
         '''
-        return df.apply(lambda x: _row_to_player(x), axis=1).tolist()
+        return df.apply(lambda x: FourForFour._row_to_player(x), axis=1).tolist()
 
     @staticmethod
     def filter_players(df, thresh=None):
@@ -408,8 +417,8 @@ class FantasyPros:
 
     @staticmethod
     def adp2012(content, db, season_year, scoring_format):
-        pos = fpros_playercode_positions(db)
-        pid = fpros_playercode_playerid(db)
+        pos = FantasyPros.fpros_playercode_positions(db)
+        pid = FantasyPros.fpros_playercode_playerid(db)
         players = []
         soup = BeautifulSoup(content, 'lxml')
         for tr in soup.find('table', {'id': 'data'}).find('tbody').find_all('tr'):
@@ -454,8 +463,8 @@ class FantasyPros:
 
     @staticmethod
     def adp2013(content, db, season_year=2013, scoring_format='ppr'):
-        pos = fpros_playercode_positions(db)
-        pid = fpros_playercode_playerid(db)
+        pos = FantasyPros.fpros_playercode_positions(db)
+        pid = FantasyPros.fpros_playercode_playerid(db)
         players = []
         soup = BeautifulSoup(content, 'lxml')
         for tr in soup.find('table', {'id': 'data'}).find('tbody').find_all('tr'):
@@ -503,8 +512,8 @@ class FantasyPros:
 
     @staticmethod
     def adp2014(content, db, season_year=2014, scoring_format='ppr'):
-        pos = fpros_playercode_positions(db)
-        pid = fpros_playercode_playerid(db)
+        pos = FantasyPros.fpros_playercode_positions(db)
+        pid = FantasyPros.fpros_playercode_playerid(db)
         players = []
         soup = BeautifulSoup(content, 'lxml')
         for tr in soup.find('table', {'id': 'data'}).find('tbody').find_all('tr'):
@@ -549,8 +558,8 @@ class FantasyPros:
 
     @staticmethod
     def adp2015(content, db, season_year=2015, scoring_format='ppr'):
-        pos = fpros_playercode_positions(db)
-        pid = fpros_playercode_playerid(db)
+        pos = FantasyPros.fpros_playercode_positions(db)
+        pid = FantasyPros.fpros_playercode_playerid(db)
         players = []
         soup = BeautifulSoup(content, 'lxml')
         for tr in soup.find('table', {'id': 'data'}).find('tbody').find_all('tr'):
@@ -1147,7 +1156,7 @@ class PyDfs:
             list: of Player
 
         '''
-        return df.apply(lambda x: row_to_player(x), axis=1).tolist()
+        return df.apply(lambda x: PyDfs.row_to_player(x), axis=1).tolist()
 
     @staticmethod
     def lineups_to_df(lineups, fn=None):

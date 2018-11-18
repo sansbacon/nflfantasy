@@ -4,6 +4,7 @@
 
 import logging
 import re
+import time
 
 from bs4 import BeautifulSoup
 
@@ -96,7 +97,7 @@ class Parser():
             return v
 
 
-    def distributions(self, content):
+    def distribution(self, content):
         '''
         Parses player distribution JSON
 
@@ -146,15 +147,36 @@ class Agent():
         Gets weekly projections
 
         Args:
-            week(int):
-
+            None
+            
         Returns:
-            list: of dict
+            dict
 
         '''
-        pass
-        #content = self._s.weekly_projections()
-        #return self._p.weekly_projections(content)
+        dists = {}
+        content = self._s.players()   
+        players = self._p.players(content)
+
+        for i in range(0, len(players), 3):
+            try:
+                ids = [players[i]['id'], players[i+1]['id'], players[i+2]['id']]
+            except IndexError:
+                try:
+                    ids = [players[i]['id'], players[i+1]['id']]
+                except:
+                    ids = [players[i]['id']]
+            idstr = ', '.join(ids)
+            logging.info('getting %s' % idstr)
+            if idstr in dists:
+                logging.info('skipping %s' % idstr)
+                continue
+            try:
+                content = a._s.distribution(ids)
+                dists[idstr] = a._p.distributions(content)
+            except:
+                logging.exception('could not get %s' % idstr)
+            time.sleep(1)
+        return dists
 
 
 if __name__ == '__main__':
