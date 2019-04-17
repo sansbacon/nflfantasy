@@ -3,14 +3,11 @@
 # scraper/parser for profootballfocus.com fantasy resources
 
 import logging
-import re
 
-from bs4 import BeautifulSoup
-
-from nflmisc.scraper import FootballScraper
+from sportscraper.scraper import RequestScraper
 
 
-class Scraper(FootballScraper):
+class Scraper(RequestScraper):
     '''
 
     '''
@@ -50,11 +47,95 @@ class Parser():
         '''
         logging.getLogger(__name__).addHandler(logging.NullHandler())
 
-    def _name(self, player):
+    @staticmethod
+    def _name(player):
         try:
-            return '{} {}'.format(player['first_name'], player['last_name'])
+            return f"{player['first_name']} {player['last_name']}"
         except:
             return None
+
+    @staticmethod
+    def _overall_rankings(rankings, playerposd):
+        '''
+        Gets overall rankings
+
+        Args:
+            rankings(dict):
+            playerposd(dict):
+
+        Returns:
+            list: of dict
+
+        '''
+        vals = []
+        position_rankings = rankings.get('position_rankings')
+        overall_rankings = [r for r in position_rankings if
+                            r['position'] == 'overall'][0]['player_rankings']
+        pff_ranks = {r['player_id']: [rk['rank'] for rk in r['ranks']]
+                     for r in overall_rankings}
+        for key, value in pff_ranks.items():
+            playerd = playerposd.get(key)
+            if playerd:
+                playerd['player_id'] = key
+                playerd['ranks'] = sorted(value)
+                if len(value) == 4:
+                    playerd['avg'] = round(sum(value[1:3]) / 2.0, 2)
+                else:
+                    playerd['avg'] = round(sum(value) / float(len(value)), 2)
+            vals.append(playerd)
+        return vals
+
+    @staticmethod
+    def _player_names(rankings):
+        '''
+        Dictionary of player_id and name
+
+        Args:
+            rankings(dict):
+
+        Returns:
+            dict
+
+        '''
+        players = rankings['players']
+        playerd = {}
+        for p in players:
+            playerd[p['player_id']] = Parser._name(p)
+        return playerd
+
+    @staticmethod
+    def _player_positions(rankings):
+        '''
+        Dictionary of player_id and position
+
+        Args:
+            position_rankings(dict):
+
+        Returns:
+            dict
+
+        '''
+        player_position_d = {}
+        position_rankings = rankings.get('position_rankings')
+        for posrk in position_rankings:
+            pos = posrk.get('position')
+            if pos in ['overall', 'dst', 'k']:
+                continue
+            for rk in posrk.get('player_rankings'):
+                player_position_d[rk.get('player_id')] = pos
+        return player_position_d
+
+    @staticmethod
+    def _player_position_dict(playerd, posd):
+        '''
+        Merges player and position dicts
+
+        '''
+        playerposd = {}
+        for k, v in playerd.items():
+            pos = posd.get(k, '').upper()
+            playerposd[k] = {'plyr': v, 'pos': pos}
+        return playerposd
 
     def bestball_rankings(self, content):
         '''
@@ -67,6 +148,12 @@ class Parser():
             list: of dict
 
         '''
+        playerd = Parser._player_names(content)
+        posd = Parser._player_positions(content)
+        playerposd = Parser._player_position_dict(playerd, posd)
+        return Parser._overall_rankings(content, playerposd)
+
+        """
         results = []
 
         # teams
@@ -100,11 +187,8 @@ class Parser():
                                     'source_player_position': pos,
                                     'season_year': season, 'source_ranking_type': ranking_type})
 
-        # players
-        # all_ranking_types
-
         return results
-
+        """
 
     def weekly_projections(self, content):
         '''
