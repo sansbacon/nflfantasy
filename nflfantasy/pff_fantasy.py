@@ -3,7 +3,7 @@
 # nflfantasy/pff_fantasy.py
 # scraper/parser for profootballfocus.com fantasy resources
 
-''''
+'''
 
 import logging
 
