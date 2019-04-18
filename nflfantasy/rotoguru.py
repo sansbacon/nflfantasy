@@ -3,11 +3,12 @@ import re
 
 from bs4 import BeautifulSoup
 
-from nflmisc.scraper import FootballScraper
+from sportscraper.scraper import RequestScraper
 
 
-class Scraper(FootballScraper):
+class Scraper(RequestScraper):
     '''
+    Scrape rotoguru pages
 
     '''
     def dfs_week(self, season_year, week, site):
@@ -15,19 +16,20 @@ class Scraper(FootballScraper):
         Gets rotoguru page of one week of dfs results - goes back to 2014
 
         Args:
-            season_year: int 2016, 2015, etc.
-            week: int 1-17
-            site: 'dk', 'fd', etc.
+            season_year(int): 2016, 2015, etc.
+            week(int): 1-17
+            site(str): 'dk', 'fd', etc.
 
         Returns:
-            HTML string
+            str - HTML
+
         '''
         sites = ['dk', 'fd', 'yh']
         if site not in sites:
             raise ValueError('invalid site: {}'.format(site))
         url = 'http://rotoguru1.com/cgi-bin/fyday.pl?'
         params = {'week': week, 'year': season_year, 'game': site, 'scsv': 1}
-        return self.get(url, payload=params)
+        return self.get(url, params=params)
 
 
 class Parser():
@@ -74,6 +76,20 @@ class Agent():
         self._s = Scraper(cache_name=cache_name)
         self._p = Parser()
 
+    def dfs_week(self, season_year, week, site):
+        '''
+
+        Args:
+            season_year(int): 2015 -
+            week(int): 1-17
+            site(str): 'dk', 'fd'
+
+        Returns:
+            str - HTML
+
+        '''
+        content = self._s.dfs_week(season_year, week, site)
+        return self._p.dfs_week(content)
 
 
 if __name__ == '__main__':

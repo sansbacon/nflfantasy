@@ -1,6 +1,9 @@
-# -*- coding: utf-8 -*-
+'''
+
 # nflfantasy/pff_fantasy.py
 # scraper/parser for profootballfocus.com fantasy resources
+
+''''
 
 import logging
 
@@ -9,6 +12,7 @@ from sportscraper.scraper import RequestScraper
 
 class Scraper(RequestScraper):
     '''
+    Scraper for profootballfocus.com fantasy resources
 
     '''
     def bestball(self):
@@ -39,6 +43,9 @@ class Scraper(RequestScraper):
 
 class Parser():
     '''
+    Parser for profootballfocus.com fantasy resources
+
+
     '''
 
     def __init__(self):

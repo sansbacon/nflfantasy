@@ -2,15 +2,15 @@
 
 import logging
 import re
+from urllib.parse import urlencode
 
 from bs4 import BeautifulSoup
-import unidecode
 
-from nfl.dates import today, yesterday_x, convert_format
+from sportscraper.dates import today, yesterday_x, convert_format
 from nfl.seasons import current_season_year
 from nfl.teams import nickname_to_code
-from nfl.utility import merge_two
-from nflmisc.browser import BrowserScraper
+from sportscraper.utility import merge_two
+from sportscraper.scraper import BrowserScraper
 
 
 class Scraper(BrowserScraper):
@@ -18,20 +18,48 @@ class Scraper(BrowserScraper):
 
     '''
 
-    def __init__(self, config, visible=False, profile=None):
+    def __init__(self, username, password, visible=False, profile=None):
+        '''
+
+        Args:
+            username:
+            password:
+            visible:
+            profile:
+
+        Returns:
+            Scraper
+
+        '''
         logging.getLogger(__name__).addHandler(logging.NullHandler())
         BrowserScraper.__init__(self, visible=visible, profile=profile)
-        self.user = config.get('espn', 'username')
-        self.password = config.get('espn', 'password')
+        self.user = username
+        self.password = password
+
+    def _get(self, url):
+        '''
+
+        Args:
+            url:
+
+        Returns:
+
+        '''
+        self.browser.get(url)
+        self.urls.append(url)
+        return self.browser.page_source
 
     def drops(self, league_id, season_year=None, start_date=None, end_date=None):
         '''
-        http://games.espn.com/ffl/recentactivity?
 
         Args:
             league_id:
+            season_year:
+            start_date:
+            end_date:
 
         Returns:
+            str: HTML page
 
         '''
         if not start_date:
@@ -41,7 +69,7 @@ class Scraper(BrowserScraper):
         if not season_year:
             season_year = current_season_year()
 
-        url = 'http://games.espn.com/ffl/recentactivity'
+        base_url = 'http://games.espn.com/ffl/recentactivity?'
         params = {
             'leagueId': league_id,
             'activityType': '2',
@@ -52,34 +80,26 @@ class Scraper(BrowserScraper):
             'tranType': '3'
         }
 
-        url = '{}?{}'.format(url, urlencode(params))
-        driver = self.browser
-        driver.get(url)
-        self.urls.append(url)
-        return self.browser.page_source
+        url = f'{base_url}{urlencode(params)}'
+        return self._get(url)
 
     def fantasy_league_rosters(self, league_id, encoding='latin1'):
         '''
         Gets roster for team in ESPN fantasy league
         '''
-        url = 'http://games.espn.com/ffl/leaguerosters'
+        base_url = 'http://games.espn.com/ffl/leaguerosters?'
         params = {'leagueId': league_id}
-        url = '{}?{}'.format(url, urlencode(params))
-        driver = self.browser
-        driver.get(url)
-        self.urls.append(url)
-        return self.browser.page_source
+        url = f'{base_url}{urlencode(params)}'
+        return self._get(url)
 
     def fantasy_league_scoreboard(self, league_id, season):
         '''
         Gets scoreboard from ESPN fantasy league
         '''
         params = {'leagueId': league_id, 'seasonId': season}
-        url = 'http://games.espn.com/ffl/scoreboard?{}'.format(urlencode(params))
-        driver = self.browser
-        driver.get(url)
-        self.urls.append(url)
-        return self.browser.page_source
+        base_url = 'http://games.espn.com/ffl/scoreboard?'
+        url = f'{base_url}{urlencode(params)}'
+        return self._get(url)
 
     def fantasy_team_roster(self, league_id, team_id, season):
         '''
@@ -88,19 +108,18 @@ class Scraper(BrowserScraper):
         params = {'leagueId': league_id,
                       'teamId': team_id,
                       'seasonId': season}
-        url = 'http://games.espn.com/ffl/clubhouse?{}'.format(urlencode(params))
-        driver = self.browser
-        driver.get(url)
-        self.urls.append(url)
-        return self.browser.page_source
+        base_url = 'http://games.espn.com/ffl/clubhouse?'
+        url = f'{base_url}{urlencode(params)}'
+        return self._get(url)
 
     def fantasy_projections(self, offset=0):
         '''
         Gets ESPN fantasy football projections
         '''
-        url = 'http://games.espn.go.com/ffl/tools/projections?'
+        base_url = 'http://games.espn.go.com/ffl/tools/projections?'
         params = {'startIndex': offset}
-        return self.get(url, payload=params)
+        url = f'{base_url}{urlencode(params)}'
+        return self._get(url)
 
     def fantasy_waiver_wire(self, league_id, team_id, season, start_index=None, position=None):
         '''
@@ -115,6 +134,8 @@ class Scraper(BrowserScraper):
             'dst': 16,
             'k': 17
         }
+
+        base_url = 'http://games.espn.com/ffl/freeagency?'
         params = {'leagueId': league_id, 'teamId': team_id, 'seasonId': season}
         if start_index:
             if start_index not in [0, 50, 100, 150, 200]:
@@ -122,10 +143,8 @@ class Scraper(BrowserScraper):
             params['startIndex'] = start_index
         if position:
             params['slotCategoryId'] = slot_categories[position.lower()]
-        url = 'http://games.espn.com/ffl/freeagency?' + urlencode(params)
-        self.browser.get(url)
-        self.urls.append(url)
-        return self.browser.page_source
+        url = f'{base_url}{urlencode(params)}'
+        return self._get(url)
 
 
 class Parser():
@@ -415,7 +434,7 @@ class Agent():
     '''
     '''
 
-    def __init__(self, cache_name=None):
+    def __init__(self, cache_name='espn-fantasy-agent'):
         '''
 
         Args:

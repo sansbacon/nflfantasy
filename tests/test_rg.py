@@ -1,14 +1,11 @@
-# -*- coding: utf-8 -*-
-
-from __future__ import absolute_import, print_function, division
+# tests/test_rg.py
 
 import logging
 import random
 import sys
 import unittest
 
-from nfl.scrapers.rotoguru import RotoguruNFLScraper
-from nfl.parsers.rotoguru import RotoguruNFLParser
+from nflfantasy.rotoguru import Scraper, Parser
 
 
 class RotoguruNFL_test(unittest.TestCase):
@@ -28,12 +25,13 @@ class RotoguruNFL_test(unittest.TestCase):
         return random.choice(range(1, 18))
 
     def setUp(self):
-        self.s = RotoguruNFLScraper(cache_name='test-rg-scraper')
-        self.p = RotoguruNFLParser()
+        self.s = Scraper(cache_name='test-rg-scraper')
+        self.p = Parser()
 
     def test_dfs_week(self):
         content = self.s.dfs_week(self.season, self.week, self.game)
-        self.assertIsNotNone(content)
+        results = self.p.dfs_week(content)
+        self.assertIsNotNone(results)
 
 
 if __name__=='__main__':

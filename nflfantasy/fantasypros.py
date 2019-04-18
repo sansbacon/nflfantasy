@@ -1,17 +1,24 @@
-# -*- coding: utf-8 -*-
-# nflfantasy/fantasypros.py
-# scraper/parser for fantasypros.com
+'''
 
+# nflfantasy/fantasypros.py
+# scraper/parser/agent for fantasypros.com
+
+'''
+
+import itertools
 import logging
 import re
+import time
 
+import pandas as pd
 from bs4 import BeautifulSoup
 
-from nflmisc.scraper import FootballScraper
-from nflmisc.wayback import WaybackScraper
+from sportscraper.scraper import RequestScraper, WaybackScraper
+from nfl.seasons import get_season
+from nfl.teams import long_to_code
 
 
-class Scraper(FootballScraper):
+class Scraper(RequestScraper):
     '''
 
     '''
@@ -37,9 +44,9 @@ class Scraper(FootballScraper):
         Creates url for rankings or projections pages
 
         Args:
-            pos:
-            fmt:
-            cat: rankings or projections
+            pos(str): 'qb', etc.
+            fmt(str): 'ppr', 'std', 'hppr'
+            cat(str): rankings or projections
 
         Returns:
             url string
@@ -50,23 +57,22 @@ class Scraper(FootballScraper):
         if pos not in self.positions:
             raise ValueError('invalid format: {}'.format(fmt))
 
-        url = 'https://www.fantasypros.com/nfl/{cat}/{pos}.php'
+        url = f'https://www.fantasypros.com/nfl/{cat}/{pos}.php'
         if pos in self.ppr_positions:
             if fmt == 'std':
-                url = 'https://www.fantasypros.com/nfl/{cat}/{pos}.php'
+                url = f'https://www.fantasypros.com/nfl/{cat}/{pos}.php'
             elif fmt == 'ppr':
-                url = 'https://www.fantasypros.com/nfl/{cat}/ppr-{pos}.php'
+                url = f'https://www.fantasypros.com/nfl/{cat}/ppr-{pos}.php'
             elif fmt == 'hppr':
-                url = 'https://www.fantasypros.com/nfl/{cat}/half-point-ppr-{pos}.php'
-
-        return url.format(cat=cat, pos=pos)
+                url = f'https://www.fantasypros.com/nfl/{cat}/half-point-ppr-{pos}.php'
+        return url
 
     def adp(self, fmt):
         '''
         Gets ADP page
 
         Args:
-            fmt: 'std', 'ppr'
+            fmt(str): 'std', 'ppr'
 
         Returns:
             content: HTML string of page
@@ -76,7 +82,7 @@ class Scraper(FootballScraper):
         elif fmt == 'ppr':
             url = 'https://www.fantasypros.com/nfl/adp/ppr-overall.php'
         else:
-            raise ValueError('invalid format: {}'.format(fmt))
+            raise ValueError('invalid format: %s', fmt)
         return self.get(url)
 
     def draft_rankings(self, pos, fmt):
@@ -105,8 +111,12 @@ class Scraper(FootballScraper):
 
         '''
         # https://www.fantasypros.com/nfl/rankings/tom-brady.php?type=weekly&week=2&scoring=PPR
-        url = 'https://www.fantasypros.com/nfl/rankings/{}.php?type=weekly&week={}&scoring={}'
-        return self.get(url.format(pid, week, fmt))
+        url = f'https://www.fantasypros.com/nfl/rankings/{pid}.php?'
+        params = {'type': 'weekly',
+                  'week': week,
+                  'scoring': fmt
+                  }
+        return self.get(url, params=params)
 
     def projections(self, pos, fmt, week):
         '''
@@ -122,7 +132,7 @@ class Scraper(FootballScraper):
         '''
         url = self._construct_url(pos, fmt, 'projections')
         params = {'week': week}
-        return self.get(url, payload=params)
+        return self.get(url, params=params)
 
     def ros_rankings(self, pos, fmt):
         '''
@@ -142,7 +152,6 @@ class Scraper(FootballScraper):
     def weekly_rankings(self, pos, fmt, week=None):
         '''
         Gets weekly rankings page
-        TODO: add something for the week parameter
 
         Args:
             pos: 'qb', 'rb', 'wr', 'te', 'flex', 'qb-flex', 'k', 'dst'
@@ -153,9 +162,10 @@ class Scraper(FootballScraper):
             content: HTML string of page
         '''
         url = self._construct_url(pos, fmt, 'rankings')
+        params = {}
         if week:
-            url = '{}?week={}'.format(url, week)
-        return self.get(url)
+            params = {'week': week}
+        return self.get(url, params=params)
 
     def weekly_scoring(self, pos, params, fmt=None):
         '''
@@ -167,31 +177,30 @@ class Scraper(FootballScraper):
 
         '''
         if fmt:
-            url = 'https://www.fantasypros.com/nfl/reports/leaders/{}-{}.php?'
-            return self.get(url.format(fmt, pos.lower()), payload=params)
+            url = f'https://www.fantasypros.com/nfl/reports/leaders/{fmt}-{pos.lower()}.php?'
         else:
-            url = 'https://www.fantasypros.com/nfl/reports/leaders/{}.php?'
-            return self.get(url.format(pos.lower()), payload=params)
+            url = f'https://www.fantasypros.com/nfl/reports/leaders/{pos.lower()}.php?'
+        return self.get(url, params=params)
 
 
 class WScraper(WaybackScraper):
     '''
     '''
 
-    def weekly_rankings(self, pos, fmt, d):
+    def weekly_rankings(self, pos, fmt, datestr):
         '''
         Gets weekly rankings page
 
         Args:
-            pos: 'qb', 'rb', 'wr', 'te', 'flex', 'qb-flex', 'k', 'dst'
-            fmt: 'std', 'ppr', 'hppr'
-            d: datestring
+            pos(str): 'qb', 'rb', 'wr', 'te', 'flex', 'qb-flex', 'k', 'dst'
+            fmt(str): 'std', 'ppr', 'hppr'
+            datestr(str): datestring for closest week in wayback
 
         Returns:
-            content: 2-element tuple with HTML string of page and datestring
+            tuple: str (HTML page), str(datestring)
         '''
         url = Scraper.construct_url(pos, fmt, 'rankings')
-        return self.get_wayback(url, d)
+        return self.get_wayback(url, datestr)
 
 
 class Parser():
@@ -219,6 +228,39 @@ class Parser():
     @property
     def std_positions(self):
         return ['qb', 'k', 'dst']
+
+    def _tr(self, tr, headers):
+        '''
+        Private method to parse tr element
+
+        Args:
+            tr: BeautifulSoup element
+            headers: list of headers
+
+        Returns:
+            dict
+
+        '''
+        vals = [td.text.strip() for td in tr.find_all('td')]
+        player = dict(zip(headers, vals))
+        teams = ['ARI', 'ATL', 'BAL', 'BUF', 'CAR', 'CHI', 'CIN', 'CLE', 'DAL', 'DEN', 'DET', 'GB', 'HOU', 'IND', 'JAC',
+                 'KC', 'LAC', 'LAR', 'MIA', 'MIN', 'NE', 'NO', 'NYG', 'NYJ', 'OAK', 'PHI', 'PIT', 'SD', 'SEA', 'SF',
+                 'STL', 'TB', 'TEN', 'WAS']
+
+        # player_id in <a href="#" class="fp-player-link fp-id-11645" fp-player-name="Le'Veon Bell"></a>
+        a = tr.find('a', {'href': '#'})
+        if a:
+            player['source_player_id'] = a.attrs['class'][-1].split('-')[-1]
+            player['player'] = a['fp-player-name']
+
+        # team and bye in <small></small>
+        for child in tr.findChildren():
+            if child.name == 'small':
+                if child.text.strip() in teams:
+                    player['team_code'] = child.text.strip()
+                else:
+                    player['bye'] = child.text.strip().replace(')', '').replace('(', '')
+        return player
 
     def adp(self, content, season_year, scoring_format):
         '''
@@ -308,7 +350,7 @@ class Parser():
             list of player dict
         '''
         soup = BeautifulSoup(content, 'lxml')
-        t = soup.find('table', {'id': 'data'})
+        t = soup.find('table', {'id': 'rank-data'})
         headers = ['rank', 'player', 'pos', 'bye', 'best', 'worst', 'avg', 'stdev', 'adp', 'vs_adp']
         return [self._tr(tr, headers) for tr in t.find_all('tr', {'class': re.compile(r'mpb-player')})]
 
@@ -340,21 +382,16 @@ class Parser():
         pos = pos.upper()
         soup = BeautifulSoup(content, 'lxml')
         t = soup.find('table', {'id': 'data'})
-
+        headers = ['player', 'rush_att', 'rush_yds', 'rush_td', 'rcvg_rec', 'rcvg_yds', 'rcvg_tds', 'fl', 'fpts']
         if pos == 'QB':
             headers = ['player', 'pass_att', 'pass_cmp', 'pass_yds', 'pass_td', 'pass_int',
                        'rush_att', 'rush_yds', 'rush_td', 'fl', 'fpts']
-        elif pos == 'RB':
-            headers = ['player', 'rush_att', 'rush_yds', 'rush_td', 'rcvg_rec', 'rcvg_yds', 'rcvg_tds', 'fl', 'fpts']
-        elif pos == 'WR':
-            headers = ['player', 'rush_att', 'rush_yds', 'rush_td', 'rcvg_rec', 'rcvg_yds', 'rcvg_tds', 'fl', 'fpts']
         elif pos == 'TE':
             headers = ['player', 'rcvg_rec', 'rcvg_yds', 'rcvg_tds', 'fl', 'fpts']
         elif pos == 'K':
             headers = ['player', 'fg', 'fga', 'xpt', 'fpts']
         elif pos == 'DST':
             headers = ['player', 'sack', 'int', 'fr', 'ff', 'td', 'assist', 'safety', 'pa', 'yds_agnst', 'fpts']
-
         return [self._tr(tr, headers) for tr in t.find_all('tr', {'class': re.compile(r'mpb-player')})]
 
     def _player_id_team(self, td):
@@ -654,6 +691,14 @@ class Agent():
         self._s = Scraper(cache_name=cache_name)
         self._p = Parser()
 
+    @staticmethod
+    def pair_list(list_):
+        '''
+        Allows iteration over list two items at a time
+        '''
+        list_ = list(list_)
+        return [list_[i:i + 2] for i in range(0, len(list_), 2)]
+
     def weekly_rankings_archived(self):
         '''
         Gets old fantasypros rankings from the wayback machine
@@ -758,7 +803,7 @@ class Agent():
         # then filter out lower-ranked players with ECR threshold
         posthresh = {'QB': 20, 'RB': 50, 'WR': 70, 'TE': 14, 'DST': 20, 'K': 14}
         pcontent = self._s.get_json(url='https://www.fantasypros.com/ajax/player-search.php',
-                                    payload={'sport': 'NFL', 'position_id': 'OP'})
+                                    params={'sport': 'NFL', 'position_id': 'OP'})
 
         # add positional ranks and then filter by positional threshold
         playerdf = pd.DataFrame(pcontent)
@@ -777,7 +822,7 @@ class Agent():
         compare_url = 'https://partners.fantasypros.com/api/v1/compare-players.php?'
         expert_ranks = []
 
-        for pair in pair_list(playerdf.itertuples()):
+        for pair in Agent.pair_list(playerdf.itertuples()):
             if (pair[0][4] != pair[1][4]):
                 raise ValueError('pairs have different positions: {}'.format(pair))
             player_pair = '{}:{}'.format(pair[0][2], pair[1][2])
@@ -795,7 +840,7 @@ class Agent():
                 'callback': 'FPWSIS.compareCallback'
             }
 
-            content = self._s.get(url=compare_url, payload=params)
+            content = self._s.get(url=compare_url, params=params)
             pair_rank = self._p.expert_rankings(content)
             expert_ranks.append(pair_rank)
 

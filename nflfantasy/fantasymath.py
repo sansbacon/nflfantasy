@@ -1,35 +1,29 @@
-# -*- coding: utf-8 -*-
+'''
+
 # nflfantasy/fantasymath.py
 # scraper/parser for fantasymath.com fantasy resources
 
+'''
+
 import logging
-import re
 import time
 
-from bs4 import BeautifulSoup
-
-from nflmisc.scraper import FootballScraper
+from sportscraper.scraper import RequestScraper
 
 
-class Scraper(FootballScraper):
+class Scraper(RequestScraper):
     '''
 
     '''
 
-    def __init__(self, headers=None, cookies=None, cache_name=None,
-                 delay=1, expire_hours=168, as_string=False):
+    def __init__(self, **kwargs):
         '''
         Scrape fantasymath API
 
         Args:
-            headers: dict of headers
-            cookies: cookiejar object
-            cache_name: should be full path
-            delay: int (be polite!!!)
-            expire_hours: int - default 168
-            as_string: get string rather than parsed json
+
         '''
-        FootballScraper.__init__(self, headers, cookies, cache_name, delay, expire_hours, as_string)
+        RequestScraper.__init__(self, **kwargs)
         self.headers.update({'origin': 'https://fantasymath.com',
                              'authority': 'api.fantasymath.com',
                              'referer': 'https://fantasymath.com/'})
@@ -45,16 +39,19 @@ class Scraper(FootballScraper):
             dict
 
         '''
-        if isinstance(player_codes, str):
-            player_codes = [player_codes]
-
+        # api uses multiple parameters with same key (wdis)
+        # get_json method sorts params for caching consistency
+        # need to use tuple of lists so not overwrite wdis param
+        player_codes = list(player_codes)
         url = 'https://api.fantasymath.com/v2/players-wdis/'
-        params = {'wdis': player_codes,
-                  'dst': 'mfl',
-                  'qb': 'pass4',
-                  'scoring': 'ppr'}
-
-        return self.get_json(url, params)
+        wdis = tuple(['wdis', player_code] for player_code in player_codes)
+        params = (['dst', 'mfl'], ['qb', 'pass4'], ['scoring', 'ppr'])
+        resp = self.session.get(url, params=wdis + params)
+        self.urls.append(resp.url)
+        resp.raise_for_status()
+        if self.delay:
+            time.sleep(self.delay)
+        return resp.json()
 
     def players(self):
         '''
@@ -91,11 +88,10 @@ class Parser():
         Returns:
 
         '''
-        if isinstance(v, float):
-            return round(v, 2)
-        else:
+        try:
+            return round(v, 3)
+        except:
             return v
-
 
     def distribution(self, content):
         '''
@@ -137,9 +133,9 @@ class Agent():
     '''
     '''
 
-    def __init__(self, cache_name='fpros-nfl-agent'):
+    def __init__(self, cache_name='fantasymath-agent'):
         logging.getLogger(__name__).addHandler(logging.NullHandler())
-        self._s = Scraper(cache_name=cache_name)
+        self._s = Scraper(cache_name=cache_name, delay=1.5)
         self._p = Parser()
 
     def weekly_projections(self):
@@ -148,13 +144,13 @@ class Agent():
 
         Args:
             None
-            
+
         Returns:
             dict
 
         '''
         dists = {}
-        content = self._s.players()   
+        content = self._s.players()
         players = self._p.players(content)
 
         for i in range(0, len(players), 3):
@@ -166,16 +162,15 @@ class Agent():
                 except:
                     ids = [players[i]['id']]
             idstr = ', '.join(ids)
-            logging.info('getting %s' % idstr)
+            logging.info('getting %s', idstr)
             if idstr in dists:
-                logging.info('skipping %s' % idstr)
+                logging.info('skipping %s', idstr)
                 continue
             try:
-                content = a._s.distribution(ids)
-                dists[idstr] = a._p.distributions(content)
+                content = self._s.distribution(ids)
+                dists[idstr] = self._p.distributions(content)
             except:
-                logging.exception('could not get %s' % idstr)
-            time.sleep(1)
+                logging.exception('could not get %s', idstr)
         return dists
 
 

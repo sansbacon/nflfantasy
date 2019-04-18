@@ -7,7 +7,7 @@ import random
 import sys
 import unittest
 
-from nfl.scrapers.mfl import MFLScraper
+from nflfantasy.mfl import Scraper
 
 
 class MFL_test(unittest.TestCase):
@@ -17,10 +17,22 @@ class MFL_test(unittest.TestCase):
         return random.choice(range(2014, 2018))
 
     def setUp(self):
-        self.s = MFLScraper()
+        self.s = Scraper()
 
     def test_players(self):
         content = self.s.players(self.season)
+        self.assertIsNotNone(content)
+
+    def test_adp(self):
+        content = self.s.adp(season_year=2019, franchises=12, ppr=1)
+        self.assertIsNotNone(content)
+
+    def test_draft_results(self):
+        content = self.s.draft_results(season_year=2019, league_id=49176)
+        self.assertIsNotNone(content)
+
+    def test_league(self):
+        content = self.s.league(season_year=2019, league_id=49176)
         self.assertIsNotNone(content)
 
 

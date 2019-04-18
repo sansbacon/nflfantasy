@@ -1,16 +1,22 @@
+'''
+
+# nflfantasy/ffnerd.py
+
+'''
+
 import logging
 
-from nflmisc.scraper import FootballScraper
+from sportscraper.scraper import RequestScraper
 
 
-class Scraper(FootballScraper):
+class Scraper(RequestScraper):
+    '''
+    Access ffnerd API
+    API key required
+
     '''
 
-    '''
-
-    def __init__(self, api_key, response_format='json', league_format='1',
-                 headers=None, cookies=None, cache_name=None,
-                 delay=1, expire_hours=168, as_string=False):
+    def __init__(self, api_key, response_format='json', league_format='1', **kwargs):
         '''
         Scrape ffnerd API
 
@@ -25,7 +31,7 @@ class Scraper(FootballScraper):
             expire_hours: int - default 168
             as_string: get string rather than parsed json
         '''
-        FootballScraper.__init__(self, headers, cookies, cache_name, delay, expire_hours, as_string)
+        RequestScraper.__init__(self, **kwargs)
         self.api_key = api_key
         self.positions = ['QB', 'RB', 'WR', 'TE', 'DEF']
         self.response_format = response_format
@@ -147,6 +153,8 @@ class Scraper(FootballScraper):
 
 class Parser():
     '''
+    Parse ffnerd API
+
     '''
 
     def __init__(self):
@@ -297,13 +305,36 @@ class Parser():
 
 class Agent():
     '''
+    Common scraping/parsing tasks for ffnerd api
+
     '''
 
-    def __init__(self, cache_name='fpros-nfl-agent'):
+    def __init__(self, cache_name='ffnerd-agent'):
+        '''
+
+        Args:
+            cache_name(str): default 'ffnerd-agent'
+
+        Returns:
+            Agent
+
+        '''
         logging.getLogger(__name__).addHandler(logging.NullHandler())
         self._s = Scraper(cache_name=cache_name)
         self._p = Parser()
 
+
+    def weekly_rankings(self, season, week):
+        '''
+
+        Args:
+            season:
+            week:
+
+        Returns:
+
+        '''
+        return None
 
 
 if __name__ == '__main__':

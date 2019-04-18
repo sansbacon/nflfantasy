@@ -1,12 +1,15 @@
-# -*- coding: utf-8 -*-
+'''
+
+# tests/test_fantasymath.py
+
+'''
 
 import logging
 import random
 import sys
 import unittest
 
-from nflfantasy.scrapers.fantasymath import FantasyMathScraper
-from nflfantasy.parsers.fantasymath import FantasyMathParser
+from nflfantasy.fantasymath import Scraper, Parser
 
 
 class fantasymath_test(unittest.TestCase):
@@ -15,16 +18,15 @@ class fantasymath_test(unittest.TestCase):
 
     '''
     def setUp(self):
-        self.s = FantasyMathScraper()
-        self.p = FantasyMathParser()
+        self.s = Scraper()
+        self.p = Parser()
 
     @property
     def player_codes(self):
-        pc = ['justin-tucker', 'marshawn-lynch',
-         'jalen-richard', 'jacksonville-defense', 'royce-freeman',
+        pc = ['jalen-richard', 'royce-freeman',
          'matt-ryan', 'rashaad-penny',
          'travis-kelce', 'andy-dalton', 'austin-hooper']
-        return random.sample(pc, random.randint(1,3))
+        return random.sample(pc, random.randint(2,3))
 
     def test_players(self):
         content = self.s.players()
@@ -36,7 +38,7 @@ class fantasymath_test(unittest.TestCase):
     def test_distribution(self):
         content = self.s.distribution(self.player_codes)
         self.assertIsNotNone(content)
-        dist = self.p.distributions(content)
+        dist = self.p.distribution(content)
         self.assertIsNotNone(dist)
         self.assertIsInstance(dist, list)
 
